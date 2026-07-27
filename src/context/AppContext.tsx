@@ -122,20 +122,62 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Handle URL invite parameter (?room=BETCHA-XXXX)
   useEffect(() => {
+    if (!isAuthenticated) return;
     if (typeof window === 'undefined') return;
+
     const params = new URLSearchParams(window.location.search);
     const roomParam = params.get('room');
-    if (roomParam) {
-      const targetRoom = rooms.find(
-        (r) => r.inviteCode.toUpperCase() === roomParam.toUpperCase() || r.id.toUpperCase() === roomParam.toUpperCase()
-      );
-      if (targetRoom) {
-        setSelectedRoomId(targetRoom.id);
-        setCurrentTabState('lobbies');
-        showToast(`Joined match room ${targetRoom.title}!`, 'success');
-      }
+    if (!roomParam) return;
+
+    let targetRoom = rooms.find(
+      (r) => r.inviteCode.toUpperCase() === roomParam.toUpperCase() || r.id.toUpperCase() === roomParam.toUpperCase()
+    );
+
+    if (!targetRoom) {
+      const roomNumStr = roomParam.replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000).toString();
+      const roomNum = parseInt(roomNumStr) || 1234;
+      const game = GAMES_LIST[roomNum % GAMES_LIST.length];
+
+      targetRoom = {
+        id: `BTC-${roomNum}`,
+        title: `${game.title} Challenge #${roomNum}`,
+        gameId: game.id,
+        hostId: 'usr_host',
+        hostName: 'CyberHost',
+        buyIn: 5,
+        maxPlayers: 2,
+        status: 'waiting',
+        createdAt: 'Just now',
+        spreadPercent: 5,
+        totalPot: 5,
+        platformFee: 0.25,
+        netPrizePool: 4.75,
+        distribution: 'winner_takes_all',
+        durationSeconds: game.id === 'snake' ? 60 : game.id === '2048' ? 90 : 45,
+        inviteCode: `BETCHA-${roomNum}`,
+        players: [
+          {
+            id: 'usr_host',
+            name: 'CyberHost',
+            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=Host_${roomNum}`,
+            isHost: true,
+            isReady: true,
+            isCurrentUser: false,
+          }
+        ]
+      };
+
+      setRooms((prev) => [targetRoom!, ...prev]);
+      return;
     }
-  }, []);
+
+    // Auto-join the match room
+    joinMatch(targetRoom.id);
+
+    // Clean up query param so it doesn't trigger again
+    const newUrl = window.location.pathname;
+    window.history.replaceState({}, document.title, newUrl);
+  }, [isAuthenticated, rooms]);
 
   useEffect(() => {
     localStorage.setItem('betcha_user', JSON.stringify(user));
@@ -395,6 +437,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const startMatchLobby = (roomId: string) => {
     const room = rooms.find((r) => r.id === roomId);
     if (!room) return;
+
+    if (room.players.length < 2) {
+      showToast('Cannot start match until both players have joined!', 'warning');
+      return;
+    }
 
     soundFx.playClick();
     setRooms((prev) =>

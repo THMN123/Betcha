@@ -363,21 +363,33 @@ const LobbiesView: React.FC = () => {
 
             {/* Actions */}
             <div className="space-y-2">
-              <button
-                type="button"
-                onClick={() => {
-                  if (activeDetailRoom.status === 'waiting') {
-                    startMatchLobby(activeDetailRoom.id);
-                  } else {
-                    enterMatchArena(activeDetailRoom);
-                  }
-                  setSelectedRoomId(null);
-                }}
-                className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2"
-              >
-                <Play className="w-5 h-5 fill-current" />
-                <span>Enter Arcade Arena</span>
-              </button>
+              {activeDetailRoom.players.length < 2 ? (
+                <div className="w-full py-3.5 rounded-xl bg-zinc-800 border border-zinc-700/50 text-zinc-400 font-bold text-xs flex flex-col items-center justify-center gap-1.5 p-3 text-center">
+                  <div className="flex items-center gap-2 text-indigo-400">
+                    <Users className="w-4 h-4 animate-pulse" />
+                    <span>Waiting for Opponent</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-normal">
+                    Matches require at least 2 players. Share the invite link above!
+                  </span>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (activeDetailRoom.status === 'waiting') {
+                      startMatchLobby(activeDetailRoom.id);
+                    } else {
+                      enterMatchArena(activeDetailRoom);
+                    }
+                    setSelectedRoomId(null);
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider shadow-lg shadow-emerald-500/25 flex items-center justify-center gap-2"
+                >
+                  <Play className="w-5 h-5 fill-current" />
+                  <span>Enter Arcade Arena</span>
+                </button>
+              )}
 
               <button
                 type="button"
