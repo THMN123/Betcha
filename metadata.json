@@ -1,0 +1,6 @@
+{
+  "name": "Betcha",
+  "description": "Peer-to-peer casual arcade tournament platform for friends with wager buy-ins, playable HTML5 mini-games, escrow ledger, live leaderboards, and 5% platform spread.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
