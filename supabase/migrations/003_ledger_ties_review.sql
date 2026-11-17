@@ -231,6 +231,10 @@ begin
   end loop;
 end $$;
 
+-- Run the queued "every ledger transaction balances" checks now. The SQL editor runs this whole file as one
+-- transaction, and Postgres won't ALTER ledger_entries (below) while those checks are still pending.
+set constraints all immediate;
+
 -- Retire the old balance sources so there is exactly one.
 drop trigger if exists on_auth_user_created on auth.users;  -- old signup hook wrote a second wallet
 do $$
