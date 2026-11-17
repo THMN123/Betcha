@@ -1,5 +1,18 @@
 import { useEffect, useRef } from 'react';
 
+// ctx.roundRect is missing on older phones (Safari < 16, Chrome < 99). Simple fallback.
+if (typeof CanvasRenderingContext2D !== 'undefined' && !CanvasRenderingContext2D.prototype.roundRect) {
+  (CanvasRenderingContext2D.prototype as any).roundRect = function (x: number, y: number, w: number, h: number, r: number) {
+    const rr = Math.max(0, Math.min(Number(r) || 0, w / 2, h / 2));
+    this.moveTo(x + rr, y);
+    this.arcTo(x + w, y, x + w, y + h, rr);
+    this.arcTo(x + w, y + h, x, y + h, rr);
+    this.arcTo(x, y + h, x, y, rr);
+    this.arcTo(x, y, x + w, y, rr);
+    this.closePath();
+  };
+}
+
 /**
  * Keeps a canvas's backing store at the device's pixel density (crisp on phones) and calls `draw`
  * every animation frame with a context scaled to the game's logical size.

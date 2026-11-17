@@ -84,7 +84,13 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
     }
 
     // Opponents' orbs (ghosts).
-    for (const g of ghosts.views(performance.now())) {
+    let views: ReturnType<typeof ghosts.views> = [];
+    try {
+      views = ghosts.views(performance.now()); // decoration only: never let it break your run
+    } catch (e) {
+      console.warn('ghost render skipped', e);
+    }
+    for (const g of views) {
       const gx = g.done ? g.cur.x : lerp(g.prev.x, g.cur.x, g.frac);
       const color = peerColor(g.id, opponentIds);
       glowDot(ctx, gx, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS * 0.85, color, g.done ? 0.25 : 0.55);

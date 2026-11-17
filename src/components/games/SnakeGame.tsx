@@ -66,6 +66,16 @@ function drawSnakeBody(ctx: CanvasRenderingContext2D, pts: { x: number; y: numbe
   glowDot(ctx, pts[0].x, pts[0].y, width * 0.62, head);
 }
 
+/** Opponent ghosts are decoration: if anything about them fails, skip them rather than break your game. */
+function safeViews<T>(g: { views: (now: number) => T[] }, now: number): T[] {
+  try {
+    return g.views(now);
+  } catch (e) {
+    console.warn('ghost render skipped', e);
+    return [];
+  }
+}
+
 const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const prevSnake = useRef<Cell[] | null>(null);
@@ -101,7 +111,7 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
     const s = stateRef.current;
 
     // Opponents' ghosts (behind your own snake), rebuilt locally from their inputs.
-    for (const g of ghosts.views(performance.now())) {
+    for (const g of safeViews(ghosts, performance.now())) {
       const pts = interpolated(g.done ? null : g.prev.snake, g.cur.snake, g.done ? 1 : g.frac);
       const color = peerColor(g.id, opponentIds);
       ctx.globalAlpha = g.done ? 0.18 : 0.38;

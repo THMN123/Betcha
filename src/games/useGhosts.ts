@@ -55,7 +55,13 @@ export function useGhosts<S>(sim: GameSim<S>, live: LiveFeed | null | undefined,
   // Games without a canvas loop (2048) still need the scoreboard to update.
   useEffect(() => {
     if (!live) return;
-    const iv = setInterval(() => views(performance.now()), 200);
+    const iv = setInterval(() => {
+      try {
+        views(performance.now());
+      } catch {
+        /* scoreboard extras only */
+      }
+    }, 200);
     return () => clearInterval(iv);
   }, [live, views]);
 

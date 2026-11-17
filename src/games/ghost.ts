@@ -1,5 +1,8 @@
 import type { GameSim, InputEvent } from '../../supabase/functions/_shared/games/index.ts';
 
+// structuredClone is missing on older phones (e.g. iOS < 15.4); game states are plain JSON data.
+const clone: <T>(v: T) => T = typeof structuredClone === 'function' ? structuredClone : (v) => JSON.parse(JSON.stringify(v));
+
 /**
  * Re-creates an opponent's run locally from their inputs.
  *
@@ -32,7 +35,7 @@ export class GhostRunner<S> {
 
   constructor(private sim: GameSim<S>, private seed: number, private maxTicks: number) {
     this.confirmed = sim.init(seed);
-    this.history.set(0, structuredClone(this.confirmed));
+    this.history.set(0, clone(this.confirmed));
   }
 
   /** Adds inputs + the peer's current tick from a message. Ignores anything malformed. */
@@ -48,7 +51,7 @@ export class GhostRunner<S> {
         this.confirmed = this.sim.init(this.seed);
         this.confirmedSteps = 0;
         this.history.clear();
-        this.history.set(0, structuredClone(this.confirmed));
+        this.history.set(0, clone(this.confirmed));
       } else {
         this.inputs.push(ev);
         this.inputs.sort((a, b) => a[0] - b[0]);
@@ -80,7 +83,7 @@ export class GhostRunner<S> {
       this.sim.step(state);
       k++;
       if (isConfirmed) {
-        this.history.set(k, structuredClone(state));
+        this.history.set(k, clone(state));
         this.history.delete(k - GhostRunner.HISTORY);
       }
     }
@@ -113,7 +116,7 @@ export class GhostRunner<S> {
 
   private predict(k: number): S {
     if (k >= this.confirmedSteps) {
-      const s = structuredClone(this.confirmed) as S;
+      const s = clone(this.confirmed) as S;
       if (k > this.confirmedSteps) this.advance(s, this.confirmedSteps, k, false);
       return s;
     }

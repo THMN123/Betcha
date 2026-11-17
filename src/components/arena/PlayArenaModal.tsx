@@ -34,7 +34,9 @@ const PlayArenaModal: React.FC = () => {
   const [showSummary, setShowSummary] = useState<boolean>(false);
 
   // True from the moment this device starts a run until it has been submitted.
-  const [localRun, setLocalRun] = useState<'idle' | 'playing' | 'submitting'>('idle');
+  // 'starting' is set BEFORE asking the server, so a data refresh that sees the new run can never
+  // mistake it for one from another device and swap the game out mid-start.
+  const [localRun, setLocalRun] = useState<'idle' | 'starting' | 'playing' | 'submitting'>('idle');
 
   // Live view of the other players (display only; results come from server verification).
   const matchId = activePlayingMatch?.id ?? null;
@@ -116,8 +118,9 @@ const PlayArenaModal: React.FC = () => {
 
   const getSeed = async (): Promise<number | null> => {
     if (isPractice || !liveMatch) return randomSeed();
+    setLocalRun('starting');
     const seed = await beginRun(liveMatch.id);
-    if (seed !== null) setLocalRun('playing');
+    setLocalRun(seed !== null ? 'playing' : 'idle');
     return seed;
   };
 
@@ -130,7 +133,7 @@ const PlayArenaModal: React.FC = () => {
 
   const handleExit = () => {
     if (
-      localRun === 'playing' &&
+      (localRun === 'playing' || localRun === 'starting') &&
       !window.confirm('Leave now? Your run is already started and cannot be restarted, so it will count as 0.')
     ) {
       return;
