@@ -14,6 +14,13 @@
 --   submit grace: a run must be submitted within duration + 60s of starting it
 --   settle:       anyone in the match may force settlement after start + 120s + duration + 60s
 
+-- Superseded: once 003 (ledger) is applied, re-running this file would bring back old balance columns.
+do $$ begin
+  if to_regclass('public.ledger_entries') is not null then
+    raise exception 'This migration is superseded by 003_ledger_ties_review.sql and must not be re-run';
+  end if;
+end $$;
+
 create table if not exists public.match_seeds (
   match_id text primary key references public.matches (id) on delete cascade,
   seed bigint not null

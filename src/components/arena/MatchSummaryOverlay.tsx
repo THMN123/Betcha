@@ -15,13 +15,16 @@ export const MatchSummaryOverlay: React.FC<MatchSummaryOverlayProps> = ({ room, 
   const { user, setCurrentTab, setSelectedRoomId } = useApp();
 
   const settled = room.status === 'completed';
+  const underReview = room.status === 'under_review';
   const me = room.players.find((p) => p.id === user.id);
   const pending = room.players.filter((p) => p.score === undefined).length;
   const players = settled
     ? [...room.players].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99))
     : [...room.players].sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
 
-  const isWinner = settled && room.winnerId === user.id;
+  const firstPlace = room.players.filter((p) => p.rank === 1);
+  const isWinner = settled && me?.rank === 1 && (me?.payout ?? 0) > 0;
+  const tiedFirst = settled && firstPlace.length > 1;
 
   return (
     <motion.div
@@ -36,17 +39,19 @@ export const MatchSummaryOverlay: React.FC<MatchSummaryOverlayProps> = ({ room, 
         </div>
 
         <h3 className="text-xl font-black text-white mb-1">
-          {!settled && me?.score === undefined ? 'Submitting your run...' : !settled ? 'Score verified!' : isWinner ? 'You won!' : `${room.winnerName} wins`}
+          {underReview ? 'Results under review' : !settled && me?.score === undefined ? 'Submitting your run...' : !settled ? 'Score verified!' : isWinner ? (tiedFirst ? 'Tied for 1st!' : 'You won!') : tiedFirst ? `Tie: ${room.winnerName}` : `${room.winnerName} wins`}
         </h3>
         <p className="text-xs text-zinc-400 mb-4">
-          {!settled && me?.score === undefined
+          {underReview
+            ? 'A winning run was flagged by our fair-play checks, so payouts are on hold until it has been reviewed.'
+            : !settled && me?.score === undefined
             ? "We're verifying your run on the server. If you're offline it will be retried automatically."
             : !settled
             ? `You scored ${(me?.score ?? 0).toLocaleString()}. Waiting for ${pending} more player${pending === 1 ? '' : 's'} to finish. This updates live.`
             : isWinner
             ? `${cr(me?.payout ?? 0)} has been added to your wallet.`
             : (me?.payout ?? 0) > 0
-            ? `2nd place: ${cr(me?.payout ?? 0)} added to your wallet.`
+            ? `Your prize: ${cr(me?.payout ?? 0)} added to your wallet.`
             : 'Better luck next round.'}
         </p>
 

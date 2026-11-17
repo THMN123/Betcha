@@ -36,7 +36,7 @@ function draw(ctx: CanvasRenderingContext2D, s: DodgeState) {
   ctx.shadowColor = '#f43f5e';
   ctx.shadowBlur = 15;
   ctx.beginPath();
-  ctx.arc(s.lane * lw + lw / 2, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS, 0, Math.PI * 2);
+  ctx.arc(s.x, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS, 0, Math.PI * 2);
   ctx.fill();
   for (const o of s.obstacles) {
     ctx.fillStyle = COLORS[o.colorIndex];
@@ -75,7 +75,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
   }, [stateRef]);
 
   const toLane = (lane: number) => {
-    if (stateRef.current?.lane === lane) return;
+    if (stateRef.current?.targetLane === lane) return;
     soundFx.playClick();
     sendInput(lane);
   };
@@ -83,7 +83,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!hud.running) return;
-      const lane = stateRef.current?.lane ?? 1;
+      const lane = stateRef.current?.targetLane ?? 1;
       if (e.key === 'ArrowLeft' || e.key === 'a') {
         e.preventDefault();
         toLane(Math.max(0, lane - 1));
@@ -102,11 +102,11 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
     toLane(Math.min(2, Math.floor(((e.touches[0].clientX - rect.left) / rect.width) * 3)));
   };
 
-  const lane = stateRef.current?.lane ?? 1;
+  const lane = stateRef.current?.targetLane ?? 1;
 
   return (
     <div className="flex flex-col items-center justify-center w-full max-w-sm mx-auto p-3">
-      <GameHud hud={hud} label="Reflex Score" theme={theme} />
+      <GameHud hud={hud} label="Distance" theme={theme} survivalMode />
       <div
         onTouchStart={onTouch}
         className="relative w-full aspect-[280/380] bg-zinc-950 border-2 border-zinc-800 rounded-2xl overflow-hidden shadow-2xl touch-none select-none"
@@ -115,7 +115,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
         <GameOverlays
           hud={hud}
           title="Neon Reflex Dodge"
-          howTo="Tap a lane (or use arrow keys) to dodge the falling walls. They speed up as you score."
+          howTo="Tap a lane (or use arrow keys) to slide over and dodge the walls. They keep speeding up, so the run ends when you crash. Last longest to win."
           icon={<Zap className="w-7 h-7" />}
           theme={theme}
           isPractice={isPractice}

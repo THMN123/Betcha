@@ -89,7 +89,7 @@ const LobbiesView: React.FC = () => {
   const myRooms = rooms.filter((r) => r.players.some((p) => p.isCurrentUser));
   const openRooms = rooms.filter((r) => r.status === 'waiting' && !r.players.some((p) => p.isCurrentUser));
   const orderedRooms = [
-    ...myRooms.filter((r) => r.status === 'waiting' || r.status === 'in_progress'),
+    ...myRooms.filter((r) => r.status === 'waiting' || r.status === 'in_progress' || r.status === 'under_review'),
     ...openRooms,
     ...myRooms.filter((r) => r.status === 'completed' || r.status === 'cancelled'),
   ];
@@ -206,6 +206,8 @@ const LobbiesView: React.FC = () => {
                       ? 'Playing'
                       : room.status === 'cancelled'
                       ? 'Cancelled'
+                      : room.status === 'under_review'
+                      ? 'Under review'
                       : room.winnerId === user.id
                       ? 'You won'
                       : 'Finished'}

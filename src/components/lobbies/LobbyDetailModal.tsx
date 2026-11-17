@@ -52,7 +52,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
   };
 
   const ranked = [...room.players].sort((a, b) => (a.rank ?? 99) - (b.rank ?? 99));
-  const playersToShow = room.status === 'completed' ? ranked : room.players;
+  const playersToShow = room.status === 'completed' || room.status === 'under_review' ? ranked : room.players;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={onClose}>
@@ -147,7 +147,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                     ) : (
                       <span className="text-zinc-500">Not ready</span>
                     ))}
-                  {room.status === 'in_progress' &&
+                  {(room.status === 'in_progress' || room.status === 'under_review') &&
                     (p.score !== undefined ? (
                       <span className="text-emerald-400">{p.score.toLocaleString()} pts</span>
                     ) : (
@@ -267,14 +267,26 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
               <Trophy className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
               <p className="text-xs font-bold text-emerald-300">
-                {room.winnerId === user.id ? 'You won this match!' : `${room.winnerName} won this match`}
+                {me && me.rank === 1 && (me.payout ?? 0) > 0
+                  ? room.players.filter((p) => p.rank === 1).length > 1
+                    ? 'You tied for first and split the prize!'
+                    : 'You won this match!'
+                  : `${room.winnerName} won this match`}
               </p>
+            </div>
+          )}
+
+          {room.status === 'under_review' && (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center text-xs text-amber-200">
+              <ShieldCheck className="w-4 h-4 inline mr-1" />
+              A winning run was flagged by our fair-play checks. Payouts are on hold until it's reviewed; if the
+              match is voided, every buy-in is refunded in full.
             </div>
           )}
 
           {room.status === 'cancelled' && (
             <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-center text-xs text-zinc-400">
-              <ShieldCheck className="w-4 h-4 inline mr-1" /> This lobby was cancelled and everyone was refunded.
+              <ShieldCheck className="w-4 h-4 inline mr-1" /> This match was cancelled and everyone was refunded.
             </div>
           )}
         </div>

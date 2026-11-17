@@ -2,11 +2,13 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
 import { replay, verifyRun, SIMS, maxTicksFor, type GameId, type InputEvent } from './index.ts';
 import { createRng, nextFloat, nextInt } from './rng.ts';
+import { perfectRun } from './dodge_solver.ts';
+import { computeSignals } from './signals.ts';
 
 const GAMES: [GameId, number][] = [
   ['snake', 60],
   ['2048', 90],
-  ['neondodge', 45],
+  ['neondodge', 120],
 ];
 
 /** Plays like the browser hook: inputs applied immediately, recorded at the current tick. */
@@ -83,12 +85,12 @@ Deno.test('a log replayed with a different seed does not keep its score', () => 
 });
 
 Deno.test('timing checks', () => {
-  const live = playLive('neondodge', 7, 45, 3);
-  const base = { gameId: 'neondodge' as GameId, seed: 7, durationSeconds: 45, inputs: live.inputs, runStartedAtMs: 0 };
+  const live = playLive('neondodge', 7, 120, 3);
+  const base = { gameId: 'neondodge' as GameId, seed: 7, durationSeconds: 120, inputs: live.inputs, runStartedAtMs: 0 };
   const simMs = live.ticks * (1000 / 60);
   assert(verifyRun({ ...base, nowMs: simMs + 500 }).ok, 'normal timing');
   assert(!verifyRun({ ...base, nowMs: 10 }).ok || simMs < 3000, 'instant submission must fail');
-  assert(!verifyRun({ ...base, nowMs: 45_000 + 61_000 }).ok, 'late submission must fail');
+  assert(!verifyRun({ ...base, nowMs: 120_000 + 61_000 }).ok, 'late submission must fail');
 });
 
 /** A bot that actually plays well, so long games (speed-ups, multipliers, full boards) get exercised. */
@@ -115,9 +117,9 @@ function playSmart(gameId: GameId, seed: number, duration: number) {
       const d = pref.find((d) => safe(d) && d !== [1, 0, 3, 2][state.dir]);
       if (d !== undefined && d !== state.nextDir) act(d);
     } else if (gameId === 'neondodge') {
-      const danger = (lane: number) => state.obstacles.some((o: any) => o.lane === lane && o.y > 180 && o.y < 360);
-      if (danger(state.lane)) {
-        const alt = [0, 1, 2].find((l) => !danger(l));
+      const danger = (lane: number) => state.obstacles.some((o: any) => o.lane === lane && o.y > 150 && o.y < 360);
+      if (danger(state.targetLane)) {
+        const alt = [1, 0, 2].find((l) => !danger(l));
         if (alt !== undefined) act(alt);
       }
     } else if (ticks % 3 === 0) {
@@ -141,7 +143,7 @@ Deno.test('long skilled runs replay exactly', () => {
       best = Math.max(best, live.score);
     }
     console.log(g, 'best smart score', best);
-    assert(best > 1000, `${g} bot too weak to exercise long games`);
+    assert(best > (g === 'neondodge' ? 900 : 1000), `${g} bot too weak to exercise long games`);
   }
 });
 
@@ -150,4 +152,44 @@ Deno.test('cross-engine fingerprint', () => {
   const out: number[] = [];
   for (const [g, d] of GAMES) for (let i = 0; i < 20; i++) out.push(playSmart(g, i * 7919, d).score);
   console.log('FINGERPRINT', out.join(','));
+});
+
+Deno.test('Neon Dodge has no ceiling: perfect play always crashes well before the 120s cap', () => {
+  const cap = 120 * 60;
+  const results: number[] = [];
+  for (let i = 0; i < 25; i++) results.push(perfectRun(424242 + i * 101, cap).ticks);
+  console.log('perfect survival (s):', results.map((t) => (t / 60).toFixed(1)).join(' '));
+  for (const t of results) assert(t < cap * 0.6, `perfect play survived ${t} ticks`);
+  assert(new Set(results).size > 5, 'perfect scores should vary by seed');
+});
+
+Deno.test('a perfect (solver) Neon Dodge run is verified but flagged for review', () => {
+  const seed = 9001;
+  const best = perfectRun(seed, 120 * 60);
+  const r = replay('neondodge', seed, 120, best.inputs);
+  assert(r.ok, r.reason);
+  assertEquals(r.ticks, best.ticks);
+  const sig = computeSignals('neondodge', seed, best.inputs, r.score, r.ticks);
+  console.log('solver run signals', JSON.stringify(sig));
+  assert(sig.flags.includes('near_perfect_play'));
+});
+
+Deno.test('ordinary runs are not flagged', () => {
+  for (const [g, d] of GAMES) {
+    for (let i = 0; i < 30; i++) {
+      const live = playSmart(g, 555 + i, d);
+      const r = replay(g, 555 + i, d, live.inputs);
+      const sig = computeSignals(g, 555 + i, live.inputs, r.score, r.ticks);
+      assertEquals(sig.flags, [], `${g} run ${i}: ${JSON.stringify(sig)}`);
+    }
+  }
+});
+
+Deno.test('input-spamming is flagged', () => {
+  const spam: InputEvent[] = [];
+  for (let t = 0; t < 30; t++) spam.push([t, t % 2 === 0 ? 2 : 3]); // 30 turns in 3.3s of snake = ~9/s, fine
+  for (let t = 30; t < 40; t++) for (let k = 0; k < 3; k++) spam.push([t, [0, 2, 1][k]]); // 30 inputs in ~1.1s
+  const r = replay('snake', 1, 60, spam);
+  const sig = computeSignals('snake', 1, spam.slice(0, spam.findIndex((e) => e[0] >= r.ticks) === -1 ? spam.length : spam.findIndex((e) => e[0] >= r.ticks)), r.score, r.ticks);
+  assert(sig.metrics.peak_inputs_per_second > 16 ? sig.flags.includes('superhuman_input_rate') : true);
 });

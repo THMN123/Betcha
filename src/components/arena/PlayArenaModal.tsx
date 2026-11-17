@@ -240,7 +240,7 @@ const PlayArenaModal: React.FC = () => {
               </div>
 
               <span className="text-[10px] font-mono font-semibold text-zinc-400">
-                {liveMatch.status === 'completed' ? 'SETTLED' : 'IN PROGRESS'}
+                {liveMatch.status === 'completed' ? 'SETTLED' : liveMatch.status === 'under_review' ? 'UNDER REVIEW' : 'IN PROGRESS'}
               </span>
             </div>
 

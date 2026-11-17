@@ -2,7 +2,7 @@
 
 Challenge friends to quick arcade games (Cyber Snake, 2048 Neon Rush, Neon Reflex Dodge).
 Everyone buys in with **play credits**, plays the same game, and the highest score takes the pot (minus a 5% fee).
-Credits have no cash value.
+Tied players split the prize for the places they share equally. Credits have no cash value (yet).
 
 ## How a match works
 
@@ -25,8 +25,30 @@ scores can only be recorded by the `verify-run` Edge Function after it has repla
 - Seeds are random (OS CSPRNG), stored in `match_seeds` (unreadable by players) and revealed only when a run begins.
 - The server rejects malformed logs, inputs after the game ended, runs that finish faster than real time, late runs,
   and second attempts. Rejected runs score 0 and keep their input log and reason in `runs` for review.
-- Not covered yet: bots/solvers that play (or pre-compute) the game for a player. Input logs are stored so bot
-  detection can be added; plan for it before real money.
+- Bots/solvers: every verified run gets fair-play signals (`_shared/games/signals.ts`): superhuman input rate,
+  superhuman reaction (Neon Dodge), within 10% of the *best possible* run for the seed (Neon Dodge, computed exactly by
+  `dodge_solver.ts`), and per-game score thresholds from the `settings` table. If a run that would win money is flagged,
+  the match goes to **under_review**: the pot stays in escrow until an admin releases it, disqualifies the flagged player(s),
+  or voids the match (full refunds). Flags never change scores by themselves.
+- New accounts are limited to small stakes (`settings`: `new_account_max_buy_in_cents`, `new_account_min_completed_matches`).
+- Neon Dodge has no score cap: walls keep speeding up and arriving closer together, so even perfect play crashes
+  (~55-60s); the score is time survived. Snake and 2048 are time-limited.
+
+### Money / ledger
+
+- All amounts are integer **cents**. Every movement is a double-entry ledger transaction (`ledger_transactions`,
+  `ledger_entries`) whose entries sum to zero; rows are append-only. Balances live in `account_balances`:
+  `user:<id>`, `escrow:<match>`, `platform:fees` (your 5% revenue + split remainders), `platform:promotions`
+  (free credits issued, negative).
+- Integrity check (SQL editor): `select * from ledger_check();` (also shown on the admin panel).
+
+### Admins
+
+Make an account an admin in the SQL editor: `update profiles set is_admin = true where email = 'you@example.com';`
+Admins get a **fair-play review** panel on their Profile tab.
+
+Tune review/stake settings in the SQL editor, e.g.
+`update settings set value = '{"neondodge": 2700, "snake": 15000}' where key = 'review_score_above';`
 
 Run the game tests with `cd supabase/functions && deno test _shared/games/`.
 
@@ -34,7 +56,8 @@ Run the game tests with `cd supabase/functions && deno test _shared/games/`.
 
 1. **Create the tables and functions.** Supabase dashboard → SQL Editor → New query → paste the contents of
    `supabase/migrations/001_multiplayer.sql` → Run. It is safe to run again later.
-2. **Verified runs.** Paste and run `supabase/migrations/002_verified_runs.sql` too, then deploy the Edge Function with
+2. **Verified runs + ledger.** Paste and run `supabase/migrations/002_verified_runs.sql` and then
+   `003_ledger_ties_review.sql` too (001/002 refuse to re-run once 003 is applied), then deploy the Edge Function with
    the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase login`, `supabase link --project-ref YOUR-REF`,
    `supabase functions deploy verify-run`. Do these together with deploying the new app version: the old app can't
    submit scores once 002 is applied, and the new app can't without it.
@@ -68,6 +91,7 @@ npm run dev
 
 ## Known limits
 
-- Bots/solvers are not detected yet (see Anti-cheat model).
+- Bot detection flags suspicious wins for human review; it can't prove or rule out cheating on its own. Tune the
+  thresholds with real player data before real money.
 - Play credits only. Real-money wagering needs a licence/legal opinion, an approved payment provider, KYC/age checks,
   geo-blocking, responsible-gambling controls and an independent security review before launch.

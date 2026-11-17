@@ -80,7 +80,7 @@ const HomeView: React.FC = () => {
               className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-zinc-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/25 flex items-center gap-2 transition-all hover:scale-105"
             >
               <Zap className="w-4 h-4 fill-current stroke-none" />
-              <span>Enter $5 Tournament</span>
+              <span>Enter 5 cr Tournament</span>
             </button>
 
             <button
@@ -167,7 +167,7 @@ const HomeView: React.FC = () => {
                     className="py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-bold text-xs shadow-md flex items-center justify-center gap-1 transition-all"
                   >
                     <Swords className="w-3 h-3" />
-                    <span>Wager $5</span>
+                    <span>Wager 5 cr</span>
                   </button>
                 </div>
               </div>

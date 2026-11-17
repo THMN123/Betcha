@@ -15,7 +15,7 @@ export interface GameInfo {
   popularityScore: number;
 }
 
-export type MatchStatus = 'draft' | 'waiting' | 'in_progress' | 'completed' | 'cancelled';
+export type MatchStatus = 'draft' | 'waiting' | 'in_progress' | 'under_review' | 'completed' | 'cancelled';
 
 export interface MatchPlayer {
   id: string;
@@ -91,6 +91,7 @@ export interface UserProfile {
   winRate: number;
   favoriteGame: string;
   vipTier: 'Rookie' | 'Contender' | 'High Roller' | 'Legend';
+  isAdmin: boolean;
   badges: {
     id: string;
     title: string;

@@ -18,7 +18,8 @@ export interface Theme {
 }
 
 /** Score/time header shared by all games. */
-export const GameHud: React.FC<{ hud: RunHud; label: string; theme: Theme; extra?: React.ReactNode }> = ({ hud, label, theme, extra }) => (
+/** survivalMode: show time survived instead of a countdown (games that run until you fail). */
+export const GameHud: React.FC<{ hud: RunHud; label: string; theme: Theme; extra?: React.ReactNode; survivalMode?: boolean }> = ({ hud, label, theme, extra, survivalMode }) => (
   <div className="w-full flex items-center justify-between bg-zinc-900 border border-zinc-800 rounded-2xl px-4 py-2 mb-2.5 shadow-md font-mono">
     <div>
       <span className="block text-[10px] text-zinc-400 uppercase font-semibold">{label}</span>
@@ -26,10 +27,14 @@ export const GameHud: React.FC<{ hud: RunHud; label: string; theme: Theme; extra
     </div>
     {extra}
     <div className="text-right">
-      <span className="block text-[10px] text-zinc-400 uppercase font-semibold">Time</span>
-      <span className={`text-lg sm:text-xl font-black ${hud.secondsLeft <= 10 && hud.running ? 'text-rose-400 animate-pulse' : 'text-white'}`}>
-        {hud.secondsLeft}s
-      </span>
+      <span className="block text-[10px] text-zinc-400 uppercase font-semibold">{survivalMode ? 'Survived' : 'Time'}</span>
+      {survivalMode ? (
+        <span className="text-lg sm:text-xl font-black text-white">{(hud.score / 60).toFixed(1)}s</span>
+      ) : (
+        <span className={`text-lg sm:text-xl font-black ${hud.secondsLeft <= 10 && hud.running ? 'text-rose-400 animate-pulse' : 'text-white'}`}>
+          {hud.secondsLeft}s
+        </span>
+      )}
     </div>
   </div>
 );
@@ -67,8 +72,8 @@ export const GameOverlays: React.FC<{
         <p className="text-xs text-zinc-400 mb-2 max-w-[260px]">{howTo}</p>
         <p className="text-[11px] text-zinc-500 mb-5 max-w-[260px]">
           {isPractice
-            ? `Practice run, ${timeLimitSeconds}s. Nothing at stake.`
-            : `This is your one run for the match (${timeLimitSeconds}s). It starts the moment you tap, and every player gets the exact same game.`}
+            ? 'Practice run. Nothing at stake.'
+            : 'This is your one run for the match. It starts the moment you tap, and every player gets the exact same game.'}
         </p>
         <button
           type="button"

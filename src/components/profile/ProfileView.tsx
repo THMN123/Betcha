@@ -18,6 +18,8 @@ import {
 import { useApp } from '../../context/AppContext';
 import MorphingHeading from '../common/MorphingHeading';
 import { cr } from '../../utils/credits';
+import AdminReviewPanel from './AdminReviewPanel';
+import GameErrorBoundary from '../common/GameErrorBoundary';
 
 const ProfileView: React.FC = () => {
   const { user, rooms, logout } = useApp();
@@ -169,24 +171,41 @@ const ProfileView: React.FC = () => {
                 <div>
                   <span className="font-bold text-white block">{match.title}</span>
                   <span className="text-[10px] text-zinc-400">
-                    Buy-in: {cr(match.buyIn)} • Status: {match.status.replace('_', ' ')}
+                    Buy-in: {cr(match.buyIn)} • #{match.id}
                   </span>
                 </div>
 
                 <div className="text-right">
-                  {match.winnerId === user.id ? (
-                    <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                      Won +{cr(match.netPrizePool)}
-                    </span>
-                  ) : (
-                    <span className="text-xs font-semibold text-zinc-400">Completed</span>
-                  )}
+                  {(() => {
+                    const mine = match.players.find((p) => p.isCurrentUser);
+                    if (match.status === 'completed' && (mine?.payout ?? 0) > 0) {
+                      return (
+                        <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
+                          +{cr(mine?.payout ?? 0)}
+                        </span>
+                      );
+                    }
+                    const label: Record<string, string> = {
+                      waiting: 'In lobby',
+                      in_progress: 'Playing',
+                      under_review: 'Under review',
+                      completed: 'No prize',
+                      cancelled: 'Refunded',
+                    };
+                    return <span className="text-xs font-semibold text-zinc-400">{label[match.status] ?? match.status}</span>;
+                  })()}
                 </div>
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {user.isAdmin && (
+        <GameErrorBoundary onReset={() => undefined}>
+          <AdminReviewPanel />
+        </GameErrorBoundary>
+      )}
 
       {/* Sign Out Section */}
       <div className="pt-2">

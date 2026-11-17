@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2.49.4';
-import { verifyRun, MAX_INPUTS, type GameId } from '../_shared/games/index.ts';
+import { verifyRun, MAX_INPUTS, type GameId, type InputEvent } from '../_shared/games/index.ts';
+import { computeSignals } from '../_shared/games/signals.ts';
 
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -80,6 +81,11 @@ export async function handleVerifyRun(req: Request, env: Env): Promise<Response>
     nowMs: (env.now ?? Date.now)(),
   });
 
+  // Bot/solver signals: flags don't change the score, they hold a winning payout for human review.
+  const signals = result.ok
+    ? computeSignals(match.game_id as GameId, Number(run.seed), body.inputs as InputEvent[], result.score, result.ticks)
+    : { flags: [], metrics: {} };
+
   const { error: recErr } = await admin.rpc('record_run_result', {
     p_match_id: body.match_id,
     p_player_id: playerId,
@@ -88,6 +94,8 @@ export async function handleVerifyRun(req: Request, env: Env): Promise<Response>
     p_ticks: result.ticks,
     p_inputs: body.inputs,
     p_reason: result.reason ?? null,
+    p_flags: signals.flags,
+    p_metrics: signals.metrics,
   });
   if (recErr) return json(409, { error: recErr.message });
 

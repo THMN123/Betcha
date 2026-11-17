@@ -5,6 +5,13 @@
 -- Model: balances are PLAY CREDITS (no real money). Every credit movement happens inside
 -- the SECURITY DEFINER functions below; clients can read tables but never write them directly.
 
+-- Superseded: once 003 (ledger) is applied, re-running this file would bring back old balance columns.
+do $$ begin
+  if to_regclass('public.ledger_entries') is not null then
+    raise exception 'This migration is superseded by 003_ledger_ties_review.sql and must not be re-run';
+  end if;
+end $$;
+
 -- ---------------------------------------------------------------------------
 -- Move aside tables left by earlier versions of the app that have a different shape.
 -- Nothing is deleted: an incompatible table is renamed to <name>_legacy (with its

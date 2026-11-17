@@ -29,12 +29,12 @@ export const GAMES_LIST: GameInfo[] = [
     id: 'neondodge',
     title: 'Neon Reflex Dodge',
     category: 'Reflex Action',
-    description: 'Tap & hold to weave through laser barriers, matching color shields to survive high-frequency pulses.',
+    description: 'Slide between lanes to dodge falling walls. They keep getting faster. Survive the longest to win.',
     iconName: 'Zap',
     themeColor: '#f43f5e', // rose
     bgGradient: 'from-rose-900/40 via-zinc-900 to-zinc-950',
     difficulty: 'Hard',
-    avgDuration: '45s',
+    avgDuration: 'Until you crash',
     popularityScore: 91,
   },
 ];
@@ -52,6 +52,7 @@ export const INITIAL_USER: UserProfile = {
   winRate: 0,
   favoriteGame: 'Cyber Snake',
   vipTier: 'Contender',
+  isAdmin: false,
   badges: [
     { id: 'b1', title: 'Verified Contender', description: 'Registered Arcade Member', icon: 'ShieldCheck', unlocked: true },
   ],

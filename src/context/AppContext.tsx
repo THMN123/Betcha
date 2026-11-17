@@ -108,6 +108,7 @@ const EMPTY_USER: UserProfile = {
   winRate: 0,
   favoriteGame: 'Cyber Snake',
   vipTier: 'Rookie',
+  isAdmin: false,
   badges: [],
 };
 
@@ -148,7 +149,10 @@ function errorMessage(err: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
-function mapProfile(row: any, isGuest: boolean): UserProfile {
+/** Money arrives from the server in integer cents; the UI shows credits. Display only: never do money math client-side. */
+const fromCents = (c: unknown) => Number(c ?? 0) / 100;
+
+function mapProfile(row: any, wallet: any, isGuest: boolean): UserProfile {
   const played = row.matches_played ?? 0;
   const wins = row.wins_count ?? 0;
   return {
@@ -156,14 +160,15 @@ function mapProfile(row: any, isGuest: boolean): UserProfile {
     handle: row.handle ?? '',
     displayName: row.display_name ?? 'Player',
     avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/bottts/svg?seed=${row.id}`,
-    balance: Number(row.balance ?? 0),
-    escrowLocked: Number(row.escrow_locked ?? 0),
-    totalEarnings: Number(row.total_earnings ?? 0),
+    balance: fromCents(wallet?.balance_cents),
+    escrowLocked: fromCents(wallet?.escrow_cents),
+    totalEarnings: fromCents(wallet?.total_won_cents),
     matchesPlayed: played,
     winsCount: wins,
     winRate: played ? Number(((wins / played) * 100).toFixed(1)) : 0,
     favoriteGame: 'Cyber Snake',
     vipTier: vipTierFor(wins),
+    isAdmin: Boolean(row.is_admin),
     badges: [
       isGuest
         ? { id: 'guest', title: 'Guest Player', description: 'Playing without an account', icon: 'User', unlocked: true }
@@ -186,7 +191,7 @@ function mapRoom(m: any, players: any[], myId: string): MatchRoom {
       score: p.score ?? undefined,
       completedAt: p.completed_at ?? undefined,
       rank: p.rank ?? undefined,
-      payout: p.payout !== null && p.payout !== undefined ? Number(p.payout) : undefined,
+      payout: p.payout_cents !== null && p.payout_cents !== undefined ? fromCents(p.payout_cents) : undefined,
       isCurrentUser: p.player_id === myId,
     }));
 
@@ -196,16 +201,16 @@ function mapRoom(m: any, players: any[], myId: string): MatchRoom {
     gameId: m.game_id,
     hostId: m.host_id,
     hostName: m.host_name,
-    buyIn: Number(m.buy_in),
+    buyIn: fromCents(m.buy_in_cents),
     maxPlayers: m.max_players,
     players: mapped,
     status: m.status,
     createdAt: relativeTime(m.created_at),
     startedAt: m.started_at ?? undefined,
     spreadPercent: 5,
-    totalPot: Number(m.total_pot),
-    platformFee: Number(m.platform_fee),
-    netPrizePool: Number(m.net_prize_pool),
+    totalPot: fromCents(m.total_pot_cents),
+    platformFee: fromCents(m.platform_fee_cents),
+    netPrizePool: fromCents(m.net_prize_cents),
     distribution: m.distribution,
     durationSeconds: m.duration_seconds,
     inviteCode: m.invite_code,
@@ -296,15 +301,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const refresh = useCallback(async () => {
     if (!supabase || !myId) return;
 
-    const [profileRes, mineRes, txRes, lbRes] = await Promise.all([
+    const [profileRes, walletRes, mineRes, txRes, lbRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', myId).maybeSingle(),
+      supabase.from('my_wallet').select('*').maybeSingle(),
       supabase.from('match_players').select('match_id').eq('player_id', myId),
       supabase.from('transactions').select('*').eq('user_id', myId).order('created_at', { ascending: false }).limit(50),
-      supabase.from('leaderboard').select('*').order('payout', { ascending: false }).limit(10),
+      supabase.from('leaderboard').select('*').order('payout_cents', { ascending: false }).limit(10),
     ]);
 
     if (profileRes.data) {
-      setUser(mapProfile(profileRes.data, isGuest));
+      setUser(mapProfile(profileRes.data, walletRes.data, isGuest));
       setLastCreditClaim(profileRes.data.last_credit_claim ?? null);
     }
 
@@ -340,7 +346,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         id: t.id,
         timestamp: formatTime(t.created_at),
         type: t.type,
-        amount: Number(t.amount),
+        amount: fromCents(t.amount_cents),
         matchId: t.match_id ?? undefined,
         description: t.description,
         status: t.status,
@@ -355,7 +361,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         avatar: row.avatar_url,
         gameTitle: GAMES_LIST.find((g) => g.id === row.game_id)?.title ?? 'Arcade',
         highScore: row.score ?? 0,
-        payoutWon: Number(row.payout ?? 0),
+        payoutWon: fromCents(row.payout_cents),
       }))
     );
   }, [myId, isGuest]);
@@ -401,7 +407,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_players' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${myId}` }, scheduleRefresh)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${myId}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'account_balances', filter: `account=eq.user:${myId}` }, scheduleRefresh)
       .subscribe();
 
     // Safety net in case a realtime event is missed (tab asleep, flaky network).
@@ -461,7 +467,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const { data, error } = await supabase.rpc('create_match', {
       p_game_id: config.gameId,
       p_title: config.title,
-      p_buy_in: config.buyIn,
+      p_buy_in_cents: Math.round(config.buyIn * 100),
       p_max_players: config.maxPlayers,
       p_distribution: config.distribution,
     });
@@ -673,14 +679,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
 
+      if (room.status === 'under_review' && before !== undefined && before !== 'under_review') {
+        showToast(`${room.title}: results are being reviewed. Payouts are on hold until that's done.`, 'info');
+      }
+
       // Only celebrate transitions we witnessed, not matches that were already settled on load.
       if (room.status === 'completed' && before !== undefined && before !== 'completed') {
-        if (me.rank === 1) {
+        if (me.rank === 1 && (me.payout ?? 0) > 0) {
           soundFx.playWinFanfare();
           confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#6366f1', '#f59e0b', '#ec4899'] });
-          showToast(`You won ${room.title}! +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
+          const tied = room.players.filter((p) => p.rank === 1).length > 1;
+          showToast(`${tied ? 'You tied for 1st in' : 'You won'} ${room.title}! +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
         } else if ((me.payout ?? 0) > 0) {
-          showToast(`2nd place in ${room.title}: +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
+          showToast(`Prize from ${room.title}: +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
         } else {
           showToast(`${room.title} is over. ${room.winnerName} won.`, 'info');
         }
