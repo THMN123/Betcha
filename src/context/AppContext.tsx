@@ -14,6 +14,7 @@ import {
 import { GAMES_LIST } from '../data/initialData';
 import { soundFx } from '../utils/audio';
 import { supabase } from '../lib/supabaseClient';
+import type { InputEvent } from '../../supabase/functions/_shared/games/index.ts';
 
 interface Toast {
   id: string;
@@ -22,6 +23,11 @@ interface Toast {
 }
 
 type Distribution = 'winner_takes_all' | 'top_two';
+
+export type SubmitOutcome =
+  | { status: 'verified'; score: number }
+  | { status: 'rejected'; reason: string }
+  | { status: 'failed'; message: string };
 
 interface AppContextType {
   authReady: boolean;
@@ -57,7 +63,11 @@ interface AppContextType {
   leaveMatch: (roomId: string) => Promise<void>;
   togglePlayerReady: (roomId: string) => Promise<void>;
   startMatchLobby: (roomId: string) => Promise<void>;
-  submitMatchScore: (roomId: string, score: number) => Promise<void>;
+  /** Registers your one run for a match and returns the shared seed, or null if not allowed. */
+  beginRun: (roomId: string) => Promise<number | null>;
+  /** Sends a finished run's input log for server verification. Retries automatically if it fails. */
+  submitRun: (roomId: string, inputs: InputEvent[]) => Promise<SubmitOutcome>;
+  pendingSubmissions: string[];
   settleMatch: (roomId: string) => Promise<void>;
 
   claimFreeCredits: () => Promise<boolean>;
@@ -73,6 +83,17 @@ interface AppContextType {
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const PENDING_INVITE_KEY = 'betcha_pending_invite';
+const PENDING_RUNS_KEY = 'betcha_pending_runs';
+const LEGACY_KEYS = ['betcha_auth', 'betcha_user', 'betcha_rooms', 'betcha_tx', 'betcha_escrow'];
+
+type PendingRuns = Record<string, InputEvent[]>; // matchId -> input log awaiting verification
+
+function loadPendingRuns(): PendingRuns {
+  return safeStorage(() => JSON.parse(localStorage.getItem(PENDING_RUNS_KEY) || '{}'), {});
+}
+function savePendingRuns(runs: PendingRuns) {
+  safeStorage(() => localStorage.setItem(PENDING_RUNS_KEY, JSON.stringify(runs)), undefined);
+}
 
 const EMPTY_USER: UserProfile = {
   id: '',
@@ -232,6 +253,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     [showToast]
   );
 
+  // ---- Remove data left behind by the old browser-only version of the app
+  useEffect(() => {
+    for (const k of LEGACY_KEYS) safeStorage(() => localStorage.removeItem(k), undefined);
+  }, []);
+
   // ---- Invite link: capture ?room=CODE before anything else, survive sign-in redirects
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -294,13 +320,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .limit(60);
 
     const ids = (matchRows ?? []).map((m) => m.id);
-    const { data: playerRows } = ids.length
-      ? await supabase.from('match_players').select('*').in('match_id', ids)
-      : { data: [] as any[] };
+    const [{ data: playerRows }, { data: runRows }] = ids.length
+      ? await Promise.all([
+          supabase.from('match_players').select('*').in('match_id', ids),
+          supabase.from('runs').select('match_id, status').eq('player_id', myId).in('match_id', ids),
+        ])
+      : [{ data: [] as any[] }, { data: [] as any[] }];
+    const myRuns = new Map((runRows ?? []).map((r: any) => [r.match_id, r.status]));
 
     setRooms(
       (matchRows ?? [])
-        .map((m) => mapRoom(m, playerRows ?? [], myId))
+        .map((m) => ({ ...mapRoom(m, playerRows ?? [], myId), myRun: myRuns.get(m.id) }))
         // Hide other people's cancelled lobbies; keep my own history.
         .filter((r) => r.status !== 'cancelled' || r.players.some((p) => p.isCurrentUser))
     );
@@ -493,19 +523,89 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Everyone (host included) is moved into the arena by the auto-enter effect below.
   };
 
-  const submitMatchScore = async (roomId: string, score: number) => {
-    if (!supabase) return;
-    const { data, error } = await supabase.rpc('submit_score', { p_match_id: roomId, p_score: Math.max(0, Math.floor(score)) });
-    if (error) return fail(error);
-    soundFx.playPickup();
-    showToast(
-      data.status === 'completed'
-        ? `Score of ${score.toLocaleString()} submitted. Match settled!`
-        : `Score of ${score.toLocaleString()} submitted. Waiting for the others to finish...`,
-      'info'
-    );
-    await refresh();
+  const beginRun = async (roomId: string): Promise<number | null> => {
+    if (!supabase) return null;
+    const { data, error } = await supabase.rpc('begin_run', { p_match_id: roomId });
+    if (error) {
+      fail(error);
+      return null;
+    }
+    return Number(data.seed);
   };
+
+  const [pendingRuns, setPendingRuns] = useState<PendingRuns>(loadPendingRuns);
+
+  const submitRun = useCallback(
+    async (roomId: string, inputs: InputEvent[]): Promise<SubmitOutcome> => {
+      if (!supabase) return { status: 'failed', message: 'Not connected' };
+      // Persist first, so a crash/refresh/offline moment can't lose a finished run.
+      setPendingRuns((prev) => {
+        const next = { ...prev, [roomId]: inputs };
+        savePendingRuns(next);
+        return next;
+      });
+
+      const { data, error } = await supabase.functions.invoke('verify-run', { body: { match_id: roomId, inputs } });
+
+      let message: string | null = null;
+      if (error) {
+        // Read the function's own error message when there is one.
+        const ctx = (error as { context?: Response }).context;
+        message = ctx && typeof ctx.json === 'function' ? (await ctx.json().catch(() => null))?.error ?? error.message : error.message;
+      }
+      const permanent = message !== null && /already submitted|not started a run|no longer in progress|not found/i.test(message);
+
+      if (!message || permanent) {
+        setPendingRuns((prev) => {
+          const next = { ...prev };
+          delete next[roomId];
+          savePendingRuns(next);
+          return next;
+        });
+      }
+      await refresh();
+
+      if (message) {
+        if (!permanent) showToast(`Couldn't submit your run yet (${message}). We'll keep retrying.`, 'warning');
+        return { status: 'failed', message };
+      }
+      if (!data.ok) {
+        showToast(`Your run was rejected: ${data.reason}. It counts as 0.`, 'error');
+        return { status: 'rejected', reason: data.reason };
+      }
+      soundFx.playPickup();
+      showToast(`Run verified: ${Number(data.score).toLocaleString()} points.`, 'success');
+      return { status: 'verified', score: Number(data.score) };
+    },
+    [refresh, showToast]
+  );
+
+  // Retry unsent runs when we come back online / regain focus / sign in.
+  const retrying = useRef(false);
+  useEffect(() => {
+    if (!myId) return;
+    const retry = async () => {
+      if (retrying.current) return;
+      const ids = Object.keys(loadPendingRuns());
+      if (!ids.length) return;
+      retrying.current = true;
+      try {
+        for (const id of ids) {
+          const inputs = loadPendingRuns()[id];
+          if (inputs) await submitRun(id, inputs);
+        }
+      } finally {
+        retrying.current = false;
+      }
+    };
+    retry();
+    const t = setInterval(retry, 20000);
+    window.addEventListener('online', retry);
+    return () => {
+      clearInterval(t);
+      window.removeEventListener('online', retry);
+    };
+  }, [myId, submitRun]);
 
   const settleMatch = async (roomId: string) => {
     if (!supabase) return;
@@ -563,7 +663,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const me = room.players.find((p) => p.isCurrentUser);
       if (!me) continue;
 
-      if (room.status === 'in_progress' && me.score === undefined) {
+      if (room.status === 'in_progress' && me.score === undefined && !room.myRun) {
         const justStarted = before === 'waiting';
         if ((justStarted || selectedRoomId === room.id) && !autoEntered.current.has(room.id) && !activePlayingMatch) {
           autoEntered.current.add(room.id);
@@ -632,7 +732,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         leaveMatch,
         togglePlayerReady,
         startMatchLobby,
-        submitMatchScore,
+        beginRun,
+        submitRun,
+        pendingSubmissions: Object.keys(pendingRuns),
         settleMatch,
         claimFreeCredits,
         canClaimCreditsAt,

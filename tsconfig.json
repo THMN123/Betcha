@@ -22,5 +22,15 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    "supabase/functions/_shared"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "supabase/functions/**/*.test.ts"
+  ]
 }

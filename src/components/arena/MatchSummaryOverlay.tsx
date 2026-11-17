@@ -36,10 +36,12 @@ export const MatchSummaryOverlay: React.FC<MatchSummaryOverlayProps> = ({ room, 
         </div>
 
         <h3 className="text-xl font-black text-white mb-1">
-          {!settled ? 'Score submitted!' : isWinner ? 'You won!' : `${room.winnerName} wins`}
+          {!settled && me?.score === undefined ? 'Submitting your run...' : !settled ? 'Score verified!' : isWinner ? 'You won!' : `${room.winnerName} wins`}
         </h3>
         <p className="text-xs text-zinc-400 mb-4">
-          {!settled
+          {!settled && me?.score === undefined
+            ? "We're verifying your run on the server. If you're offline it will be retried automatically."
+            : !settled
             ? `You scored ${(me?.score ?? 0).toLocaleString()}. Waiting for ${pending} more player${pending === 1 ? '' : 's'} to finish. This updates live.`
             : isWinner
             ? `${cr(me?.payout ?? 0)} has been added to your wallet.`

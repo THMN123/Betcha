@@ -7,7 +7,8 @@ import NeonDodgeGame from '../games/NeonDodgeGame';
 import { GAMES_LIST } from '../../data/initialData';
 import MorphingHeading from '../common/MorphingHeading';
 import MatchSocket from '../common/MatchSocket';
-import useGameConnector from '../../hooks/useGameConnector';
+import { randomSeed } from '../games/GameShell';
+import type { RunResult } from '../../hooks/useGameRun';
 import GameErrorBoundary from '../common/GameErrorBoundary';
 import MatchSummaryOverlay from './MatchSummaryOverlay';
 import { cr } from '../../utils/credits';
@@ -18,17 +19,22 @@ const PlayArenaModal: React.FC = () => {
     practiceGameId,
     exitArena,
     rooms,
+    beginRun,
+    submitRun,
+    pendingSubmissions,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'game' | 'leaderboard'>('game');
   const [showSummary, setShowSummary] = useState<boolean>(false);
 
-  const { reportScore, startGame } = useGameConnector();
+  // True from the moment this device starts a run until it has been submitted.
+  const [localRun, setLocalRun] = useState<'idle' | 'playing' | 'submitting'>('idle');
 
   // Each new match/practice session starts on the game, not on a stale summary.
   useEffect(() => {
     setShowSummary(false);
     setActiveTab('game');
+    setLocalRun('idle');
   }, [activePlayingMatch?.id, practiceGameId]);
 
   // Lock body scroll and prevent pull-to-refresh/viewport bounce when playing in Arena
@@ -36,7 +42,6 @@ const PlayArenaModal: React.FC = () => {
     if (activePlayingMatch || practiceGameId) {
       document.body.style.overflow = 'hidden';
       document.body.style.overscrollBehavior = 'none';
-      startGame();
 
       const preventTouchMove = (e: TouchEvent) => {
         const target = e.target as HTMLElement | null;
@@ -58,7 +63,7 @@ const PlayArenaModal: React.FC = () => {
         document.removeEventListener('touchmove', preventTouchMove);
       };
     }
-  }, [activePlayingMatch, practiceGameId, startGame]);
+  }, [activePlayingMatch, practiceGameId]);
 
   if (!activePlayingMatch && !practiceGameId) return null;
 
@@ -71,20 +76,30 @@ const PlayArenaModal: React.FC = () => {
     ? rooms.find((r) => r.id === activePlayingMatch.id) || activePlayingMatch
     : null;
 
-  const myEntry = liveMatch?.players.find((p) => p.isCurrentUser);
-  const alreadySubmitted = !isPractice && myEntry?.score !== undefined;
+  // A match run that this device isn't currently playing (already finished, or started elsewhere / before a reload).
+  const runElsewhere = !isPractice && !!liveMatch?.myRun && localRun === 'idle';
+  const awaitingVerification = !!liveMatch && pendingSubmissions.includes(liveMatch.id);
+  const interrupted = runElsewhere && liveMatch?.myRun === 'started' && !awaitingVerification;
+  const showGame = isPractice || !runElsewhere;
 
-  const handleScoreSubmission = (finalScore: number) => {
-    reportScore({ matchId: liveMatch?.id, gameId, score: finalScore, isPractice });
-    if (liveMatch) setShowSummary(true);
+  const getSeed = async (): Promise<number | null> => {
+    if (isPractice || !liveMatch) return randomSeed();
+    const seed = await beginRun(liveMatch.id);
+    if (seed !== null) setLocalRun('playing');
+    return seed;
+  };
+
+  const handleFinish = async (result: RunResult) => {
+    if (isPractice || !liveMatch) return;
+    setLocalRun('submitting');
+    await submitRun(liveMatch.id, result.inputs);
+    setShowSummary(true);
   };
 
   const handleExit = () => {
     if (
-      liveMatch &&
-      liveMatch.status === 'in_progress' &&
-      !alreadySubmitted &&
-      !window.confirm("Leave without finishing? You can come back from the lobby, but if time runs out you'll score 0.")
+      localRun === 'playing' &&
+      !window.confirm('Leave now? Your run is already started and cannot be restarted, so it will count as 0.')
     ) {
       return;
     }
@@ -170,26 +185,38 @@ const PlayArenaModal: React.FC = () => {
             activeTab === 'leaderboard' && !isPractice ? 'hidden sm:flex' : 'flex'
           }`}
         >
-          {alreadySubmitted ? null : (
+          {interrupted && (
+            <div className="w-full p-5 rounded-2xl bg-zinc-900 border border-amber-500/30 text-center">
+              <p className="text-sm font-bold text-amber-300 mb-1">Your run was interrupted</p>
+              <p className="text-xs text-zinc-400">
+                You started your run but it never finished on this device (for example the page was closed or reloaded).
+                Each player gets one run, so it will count as 0 when the match settles.
+              </p>
+            </div>
+          )}
+          {showGame && (
           <GameErrorBoundary onReset={exitArena}>
             {gameId === 'snake' && (
               <SnakeGame
                 timeLimitSeconds={liveMatch?.durationSeconds || 60}
-                onGameOver={handleScoreSubmission}
+                onFinish={handleFinish}
+                getSeed={getSeed}
                 isPractice={isPractice}
               />
             )}
             {gameId === '2048' && (
               <Puzzle2048Game
                 timeLimitSeconds={liveMatch?.durationSeconds || 90}
-                onGameOver={handleScoreSubmission}
+                onFinish={handleFinish}
+                getSeed={getSeed}
                 isPractice={isPractice}
               />
             )}
             {gameId === 'neondodge' && (
               <NeonDodgeGame
                 timeLimitSeconds={liveMatch?.durationSeconds || 45}
-                onGameOver={handleScoreSubmission}
+                onFinish={handleFinish}
+                getSeed={getSeed}
                 isPractice={isPractice}
               />
             )}
@@ -283,7 +310,7 @@ const PlayArenaModal: React.FC = () => {
         )}
 
         {/* End of Match Summary Overlay */}
-        {(showSummary || alreadySubmitted) && liveMatch && (
+        {(showSummary || (runElsewhere && !interrupted)) && liveMatch && (
           <MatchSummaryOverlay
             room={liveMatch}
             onClose={() => {

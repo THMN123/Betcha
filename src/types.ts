@@ -51,6 +51,8 @@ export interface MatchRoom {
   inviteCode: string;
   winnerId?: string;
   winnerName?: string;
+  /** The signed-in player's run in this match, if they have started one. */
+  myRun?: 'started' | 'verified' | 'rejected';
 }
 
 export type TransactionType = 'deposit' | 'withdrawal' | 'buy_in' | 'payout_win' | 'platform_fee' | 'refund';

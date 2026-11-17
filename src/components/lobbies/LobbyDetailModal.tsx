@@ -5,7 +5,9 @@ import { GAMES_LIST } from '../../data/initialData';
 import { MatchRoom } from '../../types';
 import { cr, inviteUrl, shareInvite } from '../../utils/credits';
 
-const GRACE_SECONDS = 120; // must match settle_match() in the database
+// Must match settle_match() in supabase/migrations/002_verified_runs.sql
+const BEGIN_WINDOW_SECONDS = 120;
+const SUBMIT_GRACE_SECONDS = 60;
 
 const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ room, onClose }) => {
   const { user, joinMatch, leaveMatch, togglePlayerReady, startMatchLobby, enterMatchArena, settleMatch, showToast } = useApp();
@@ -25,7 +27,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
   const canStart = isHost && room.status === 'waiting' && room.players.length >= 2 && notReady === 0;
   const pending = room.players.filter((p) => p.score === undefined).length;
 
-  const settleAt = room.startedAt ? new Date(room.startedAt).getTime() + (room.durationSeconds + GRACE_SECONDS) * 1000 : null;
+  const settleAt = room.startedAt ? new Date(room.startedAt).getTime() + (BEGIN_WINDOW_SECONDS + room.durationSeconds + SUBMIT_GRACE_SECONDS) * 1000 : null;
   const secondsToSettle = settleAt ? Math.max(0, Math.ceil((settleAt - now) / 1000)) : null;
 
   const run = async (fn: () => Promise<unknown>) => {
@@ -219,7 +221,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
             </>
           )}
 
-          {room.status === 'in_progress' && me && me.score === undefined && (
+          {room.status === 'in_progress' && me && me.score === undefined && !room.myRun && (
             <button
               type="button"
               onClick={() => {
@@ -230,6 +232,12 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
             >
               <Play className="w-5 h-5 fill-current" /> Play your run now
             </button>
+          )}
+
+          {room.status === 'in_progress' && me && me.score === undefined && room.myRun === 'started' && (
+            <div className="p-3 rounded-xl bg-zinc-950 border border-amber-500/30 text-center text-xs text-amber-200">
+              Your run has started. If it was interrupted it will count as 0 when the match settles.
+            </div>
           )}
 
           {room.status === 'in_progress' && me && me.score !== undefined && (
