@@ -2,16 +2,20 @@ import React, { useEffect, useRef } from 'react';
 import { Zap } from 'lucide-react';
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
+import { peerColor } from '../../hooks/useLiveMatch';
 import {
   neonDodgeSim,
+  dodgeSpeed,
   DODGE_WIDTH,
   DODGE_HEIGHT,
+  DODGE_LANE_WIDTH,
   DODGE_PLAYER_Y,
   DODGE_PLAYER_RADIUS,
   DODGE_OBSTACLE_HEIGHT,
-  type DodgeState,
+  DODGE_OBSTACLE_INSET,
 } from '../../../supabase/functions/_shared/games/neondodge.ts';
 import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
+import { useCanvasLoop, glowDot, lerp } from './canvas';
 
 const theme: Theme = {
   accent: 'text-rose-400',
@@ -19,60 +23,80 @@ const theme: Theme = {
   badge: 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
 };
 const COLORS = ['#f43f5e', '#fb7185', '#ec4899'];
+const LIVE_EVERY_TICKS = 6; // ~10 updates/s
+const LIVE_INTERVAL_MS = LIVE_EVERY_TICKS * neonDodgeSim.tickMs;
 
-function draw(ctx: CanvasRenderingContext2D, s: DodgeState) {
-  const lw = DODGE_WIDTH / 3;
-  ctx.fillStyle = '#090d16';
-  ctx.fillRect(0, 0, DODGE_WIDTH, DODGE_HEIGHT);
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 2;
-  for (let i = 1; i < 3; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * lw, 0);
-    ctx.lineTo(i * lw, DODGE_HEIGHT);
-    ctx.stroke();
-  }
-  ctx.fillStyle = '#f43f5e';
-  ctx.shadowColor = '#f43f5e';
-  ctx.shadowBlur = 15;
-  ctx.beginPath();
-  ctx.arc(s.x, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS, 0, Math.PI * 2);
-  ctx.fill();
-  for (const o of s.obstacles) {
-    ctx.fillStyle = COLORS[o.colorIndex];
-    ctx.shadowColor = COLORS[o.colorIndex];
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.roundRect(o.lane * lw + 10, o.y, lw - 20, DODGE_OBSTACLE_HEIGHT, 6);
-    ctx.fill();
-  }
-  ctx.shadowBlur = 0;
-}
+const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
+  const prevX = useRef<number | null>(null);
 
-const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { stateRef, hud, start, sendInput } = useGameRun(
+  const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
     neonDodgeSim,
     timeLimitSeconds,
     (r) => {
       soundFx.playGameOver();
+      live?.send({ s: r.score, t: r.ticks, st: 'd', g: stateRef.current?.x });
       onFinish(r);
     },
-    (s) => {
-      if (s.passedThisTick > 0) soundFx.playPickup();
+    {
+      beforeStep: (s) => {
+        prevX.current = s.x;
+      },
+      afterStep: (s, tick) => {
+        if (s.passedThisTick > 0) soundFx.playPickup();
+        if (tick % LIVE_EVERY_TICKS === 0) live?.send({ s: s.tick, t: tick, st: 'p', g: s.x });
+      },
     }
   );
 
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      const ctx = canvasRef.current?.getContext('2d');
-      if (ctx && stateRef.current) draw(ctx, stateRef.current);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [stateRef]);
+  const canvasRef = useCanvasLoop(DODGE_WIDTH, DODGE_HEIGHT, (ctx, now) => {
+    ctx.fillStyle = '#090d16';
+    ctx.fillRect(0, 0, DODGE_WIDTH, DODGE_HEIGHT);
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(DODGE_LANE_WIDTH - 1, 0, 2, DODGE_HEIGHT);
+    ctx.fillRect(DODGE_LANE_WIDTH * 2 - 1, 0, 2, DODGE_HEIGHT);
+
+    const s = stateRef.current;
+    const t = s && !s.over ? alphaRef.current : 1;
+
+    if (s) {
+      // Walls moved `speed` px in the last tick: draw them part-way for smooth motion.
+      const back = s.over ? 0 : dodgeSpeed(s.tick) * (1 - t);
+      for (const o of s.obstacles) {
+        const x = o.lane * DODGE_LANE_WIDTH + DODGE_OBSTACLE_INSET;
+        const w = DODGE_LANE_WIDTH - DODGE_OBSTACLE_INSET * 2;
+        const y = o.y - back;
+        ctx.fillStyle = COLORS[o.colorIndex];
+        ctx.globalAlpha = 0.18;
+        ctx.beginPath();
+        ctx.roundRect(x - 4, y - 4, w + 8, DODGE_OBSTACLE_HEIGHT + 8, 9);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.roundRect(x, y, w, DODGE_OBSTACLE_HEIGHT, 6);
+        ctx.fill();
+      }
+    }
+
+    // Opponents' orbs (ghosts).
+    if (live) {
+      for (const peer of live.peersRef.current.values()) {
+        if (typeof peer.g !== 'number') continue;
+        const from = typeof peer.prevG === 'number' ? peer.prevG : peer.g;
+        const k = peer.st === 'd' ? 1 : Math.min(1, (now - peer.at) / LIVE_INTERVAL_MS);
+        const color = peerColor(peer.id, opponentIds);
+        glowDot(ctx, lerp(from, peer.g, k), DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS * 0.85, color, peer.st === 'd' ? 0.25 : 0.55);
+        ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        ctx.fillText(peer.n, lerp(from, peer.g, k), DODGE_PLAYER_Y + DODGE_PLAYER_RADIUS + 12);
+      }
+    }
+
+    if (s) {
+      const x = prevX.current === null ? s.x : lerp(prevX.current, s.x, t);
+      glowDot(ctx, x, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS, '#f43f5e');
+    }
+  });
 
   const toLane = (lane: number) => {
     if (stateRef.current?.targetLane === lane) return;
@@ -111,7 +135,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
         onTouchStart={onTouch}
         className="relative w-full aspect-[280/380] bg-zinc-950 border-2 border-zinc-800 rounded-2xl overflow-hidden shadow-2xl touch-none select-none"
       >
-        <canvas ref={canvasRef} width={DODGE_WIDTH} height={DODGE_HEIGHT} className="w-full h-full touch-none" />
+        <canvas ref={canvasRef} className="w-full h-full touch-none block" />
         <GameOverlays
           hud={hud}
           title="Neon Reflex Dodge"
@@ -122,6 +146,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
           timeLimitSeconds={timeLimitSeconds}
           getSeed={getSeed}
           start={start}
+          autoStartAt={autoStartAt}
         />
       </div>
       <div className="w-full mt-3 grid grid-cols-3 gap-2">
@@ -131,7 +156,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
             type="button"
             disabled={!hud.running}
             onClick={() => toLane(l)}
-            className={`py-3 rounded-xl border text-xs font-bold font-mono transition-all ${
+            className={`py-3 rounded-xl border text-xs font-bold font-mono transition-colors ${
               lane === l ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/30' : 'bg-zinc-900 text-zinc-400 border-zinc-800'
             }`}
           >

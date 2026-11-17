@@ -19,18 +19,6 @@ const HomeView: React.FC = () => {
     createMatch,
   } = useApp();
 
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 450);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (isLoading) {
-    return <HomeSkeleton />;
-  }
 
   const waitingRooms = rooms.filter((r) => r.status === 'waiting');
 

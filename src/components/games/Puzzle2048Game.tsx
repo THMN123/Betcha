@@ -27,17 +27,22 @@ const TILE: Record<number, string> = {
 
 const EMPTY_BOARD = Array.from({ length: 4 }, () => Array(4).fill(0));
 
-const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish }) => {
+const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, autoStartAt }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const { stateRef, hud, start, sendInput } = useGameRun(g2048Sim, timeLimitSeconds, (r) => {
+  const { stateRef, ticksRef, hud, start, sendInput } = useGameRun(g2048Sim, timeLimitSeconds, (r) => {
     soundFx.playGameOver();
+    live?.send({ s: r.score, t: r.ticks, st: 'd' });
     onFinish(r);
   });
 
   const move = (code: number) => {
     const before = stateRef.current?.score ?? 0;
     sendInput(code);
-    if ((stateRef.current?.score ?? 0) > before) soundFx.playMerge();
+    const after = stateRef.current?.score ?? 0;
+    if (after > before) {
+      soundFx.playMerge();
+      live?.send({ s: after, t: ticksRef.current, st: 'p' });
+    }
   };
 
   useEffect(() => {
@@ -99,6 +104,7 @@ const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, get
           timeLimitSeconds={timeLimitSeconds}
           getSeed={getSeed}
           start={start}
+          autoStartAt={autoStartAt}
         />
       </div>
       <div className="w-full mt-4 flex flex-col items-center gap-1.5">

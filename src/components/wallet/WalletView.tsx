@@ -24,23 +24,13 @@ import { cr } from '../../utils/credits';
 const WalletView: React.FC = () => {
   const { user, transactions, escrowLedger } = useApp();
 
-  const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'history' | 'escrow'>('history');
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
 
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoading(false);
-    }, 450);
-    return () => clearTimeout(timer);
-  }, []);
 
-  if (isLoading) {
-    return <WalletSkeleton />;
-  }
 
   const filteredTx = transactions.filter((tx) => {
     if (filterType === 'all') return true;

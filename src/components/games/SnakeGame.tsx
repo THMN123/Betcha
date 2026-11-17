@@ -2,8 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap } from 'lucide-react';
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
-import { snakeSim, SnakeAction, SNAKE_GRID, type SnakeState } from '../../../supabase/functions/_shared/games/snake.ts';
+import { peerColor } from '../../hooks/useLiveMatch';
+import { snakeSim, SnakeAction, SNAKE_GRID, type SnakeState, type Cell } from '../../../supabase/functions/_shared/games/snake.ts';
 import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
+import { useCanvasLoop, glowDot, lerp } from './canvas';
 
 const theme: Theme = {
   accent: 'text-emerald-400',
@@ -11,68 +13,125 @@ const theme: Theme = {
   badge: 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
 };
 
-function draw(ctx: CanvasRenderingContext2D, s: SnakeState) {
-  const { width: w, height: h } = ctx.canvas;
-  const cell = w / SNAKE_GRID;
-  ctx.fillStyle = '#090d16';
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = '#1e293b';
-  ctx.lineWidth = 0.5;
-  for (let i = 0; i < SNAKE_GRID; i++) {
-    ctx.beginPath();
-    ctx.moveTo(i * cell, 0);
-    ctx.lineTo(i * cell, h);
-    ctx.moveTo(0, i * cell);
-    ctx.lineTo(w, i * cell);
-    ctx.stroke();
+const SIZE = 320;
+const CELL = SIZE / SNAKE_GRID;
+const TICK_MS = snakeSim.tickMs;
+
+/** Grid is drawn once into an offscreen canvas, then blitted each frame. */
+let gridCache: HTMLCanvasElement | null = null;
+function grid(): HTMLCanvasElement {
+  if (gridCache) return gridCache;
+  const c = document.createElement('canvas');
+  c.width = SIZE * 2; // matches the 2x canvas cap, so drawing it is a straight copy
+  c.height = SIZE * 2;
+  const g = c.getContext('2d')!;
+  g.scale(2, 2);
+  g.fillStyle = '#090d16';
+  g.fillRect(0, 0, SIZE, SIZE);
+  g.strokeStyle = '#162033';
+  g.lineWidth = 0.5;
+  for (let i = 1; i < SNAKE_GRID; i++) {
+    g.beginPath();
+    g.moveTo(i * CELL, 0);
+    g.lineTo(i * CELL, SIZE);
+    g.moveTo(0, i * CELL);
+    g.lineTo(SIZE, i * CELL);
+    g.stroke();
   }
-  const orb = (x: number, y: number, r: number, color: string) => {
-    ctx.fillStyle = color;
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 10;
-    ctx.beginPath();
-    ctx.arc(x * cell + cell / 2, y * cell + cell / 2, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-  };
-  if (s.food) orb(s.food.x, s.food.y, cell / 2.5, '#10b981');
-  if (s.bonus) orb(s.bonus.x, s.bonus.y, cell / 2, '#f59e0b');
-  s.snake.forEach((seg, i) => {
-    ctx.fillStyle = i === 0 ? '#34d399' : '#059669';
-    ctx.beginPath();
-    ctx.roundRect(seg.x * cell + 1, seg.y * cell + 1, cell - 2, cell - 2, i === 0 ? 6 : 4);
-    ctx.fill();
+  gridCache = c;
+  return c;
+}
+
+/** Positions of each segment, interpolated between the previous and current tick. */
+function interpolated(prev: Cell[] | null, cur: Cell[], t: number): { x: number; y: number }[] {
+  return cur.map((c, i) => {
+    const p = prev ? prev[Math.min(i, prev.length - 1)] : c;
+    // never interpolate across a wrap/teleport (more than one cell apart)
+    const far = Math.abs(p.x - c.x) + Math.abs(p.y - c.y) > 1;
+    return { x: (far ? c.x : lerp(p.x, c.x, t)) * CELL + CELL / 2, y: (far ? c.y : lerp(p.y, c.y, t)) * CELL + CELL / 2 };
   });
 }
 
-const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish }) => {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const touchStart = useRef<{ x: number; y: number } | null>(null);
+function drawSnakeBody(ctx: CanvasRenderingContext2D, pts: { x: number; y: number }[], body: string, head: string, width: number) {
+  if (pts.length === 0) return;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = body;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.stroke();
+  glowDot(ctx, pts[0].x, pts[0].y, width * 0.62, head);
+}
 
-  const { stateRef, hud, start, sendInput } = useGameRun(
+function unflatten(g: unknown): Cell[] | null {
+  if (!Array.isArray(g) || g.length < 2) return null;
+  const out: Cell[] = [];
+  for (let i = 0; i + 1 < g.length; i += 2) out.push({ x: Number(g[i]), y: Number(g[i + 1]) });
+  return out;
+}
+
+const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const prevSnake = useRef<Cell[] | null>(null);
+
+  const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
     snakeSim,
     timeLimitSeconds,
     (r) => {
       soundFx.playGameOver();
+      const s = stateRef.current;
+      live?.send({ s: r.score, t: r.ticks, st: 'd', g: s ? s.snake.flatMap((c) => [c.x, c.y]) : undefined });
       onFinish(r);
     },
-    (s) => {
-      if (s.ateBonus) soundFx.playCashChing();
-      else if (s.ateFood) soundFx.playPickup();
+    {
+      beforeStep: (s) => {
+        prevSnake.current = s.snake.map((c) => ({ ...c }));
+      },
+      afterStep: (s, tick) => {
+        if (s.ateBonus) soundFx.playCashChing();
+        else if (s.ateFood) soundFx.playPickup();
+        // Broadcast every tick (~9/s): compact flat cell list.
+        live?.send({ s: s.score, t: tick, st: 'p', g: s.snake.flatMap((c) => [c.x, c.y]) });
+      },
     }
   );
 
-  // Draw every animation frame from the simulation state.
-  useEffect(() => {
-    let raf = 0;
-    const loop = () => {
-      const ctx = canvasRef.current?.getContext('2d');
-      if (ctx && stateRef.current) draw(ctx, stateRef.current);
-      raf = requestAnimationFrame(loop);
-    };
-    raf = requestAnimationFrame(loop);
-    return () => cancelAnimationFrame(raf);
-  }, [stateRef]);
+  const canvasRef = useCanvasLoop(SIZE, SIZE, (ctx, now) => {
+    ctx.drawImage(grid(), 0, 0, SIZE, SIZE);
+    const s = stateRef.current;
+
+    // Opponents' ghosts (behind your own snake), interpolated between their last two updates.
+    if (live) {
+      for (const peer of live.peersRef.current.values()) {
+        const cur = unflatten(peer.g);
+        if (!cur) continue;
+        const prev = unflatten(peer.prevG);
+        const t = peer.st === 'd' ? 1 : Math.min(1, (now - peer.at) / TICK_MS);
+        const pts = interpolated(prev, cur, t);
+        const color = peerColor(peer.id, opponentIds);
+        ctx.globalAlpha = peer.st === 'd' ? 0.18 : 0.38;
+        drawSnakeBody(ctx, pts, color, color, CELL * 0.62);
+        ctx.globalAlpha = 1;
+        ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        // label above the head, or below it when the head is on the top row
+        const ly = pts[0].y < CELL * 1.5 ? pts[0].y + CELL * 1.25 : pts[0].y - CELL * 0.75;
+        ctx.fillText(peer.n, Math.min(SIZE - 20, Math.max(20, pts[0].x)), ly);
+      }
+    }
+
+    if (!s) return;
+    if (s.food) glowDot(ctx, s.food.x * CELL + CELL / 2, s.food.y * CELL + CELL / 2, CELL / 2.6, '#10b981');
+    if (s.bonus) {
+      const pulse = 1 + Math.sin(now / 120) * 0.08;
+      glowDot(ctx, s.bonus.x * CELL + CELL / 2, s.bonus.y * CELL + CELL / 2, (CELL / 2.1) * pulse, '#f59e0b');
+    }
+    const t = hud.over || s.over ? 1 : alphaRef.current;
+    drawSnakeBody(ctx, interpolated(prevSnake.current, s.snake, t), '#059669', '#34d399', CELL * 0.78);
+  });
 
   const turn = (code: number) => {
     soundFx.playClick();
@@ -126,7 +185,7 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
         onTouchEnd={onTouchEnd}
         className="relative w-full aspect-square bg-zinc-950 border-2 border-zinc-800 rounded-2xl overflow-hidden shadow-2xl touch-none select-none"
       >
-        <canvas ref={canvasRef} width={320} height={320} className="w-full h-full touch-none" />
+        <canvas ref={canvasRef} className="w-full h-full touch-none block" />
         <GameOverlays
           hud={hud}
           title="Cyber Snake"
@@ -137,6 +196,7 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
           timeLimitSeconds={timeLimitSeconds}
           getSeed={getSeed}
           start={start}
+          autoStartAt={autoStartAt}
         />
       </div>
       <div className="w-full mt-3 flex flex-col items-center gap-1">

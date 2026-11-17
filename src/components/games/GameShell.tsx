@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { LiveFeed } from '../../hooks/useLiveMatch';
 import { Play, RotateCcw, Loader2 } from 'lucide-react';
 import type { RunHud, RunResult } from '../../hooks/useGameRun';
 
@@ -9,6 +10,12 @@ export interface GameProps {
   /** Returns the seed to play with (a match's shared seed, or a random one for practice). null = can't start. */
   getSeed: () => Promise<number | null>;
   onFinish: (result: RunResult) => void;
+  /** Live feed of the other players in the match (display only). */
+  live?: LiveFeed | null;
+  /** Opponent ids, in a stable order, for ghost colors. */
+  opponentIds?: string[];
+  /** Local timestamp (Date.now() scale) when the synchronized match start fires; null = manual start. */
+  autoStartAt?: number | null;
 }
 
 export interface Theme {
@@ -50,8 +57,26 @@ export const GameOverlays: React.FC<{
   timeLimitSeconds: number;
   getSeed: () => Promise<number | null>;
   start: (seed: number) => void;
-}> = ({ hud, title, howTo, icon, theme, isPractice, timeLimitSeconds, getSeed, start }) => {
+  autoStartAt?: number | null;
+}> = ({ hud, title, howTo, icon, theme, isPractice, timeLimitSeconds, getSeed, start, autoStartAt }) => {
   const [starting, setStarting] = useState(false);
+  const [now, setNow] = useState(Date.now());
+  const autoFired = useRef(false);
+  const countingDown = !!autoStartAt && !hud.running && !hud.over && autoStartAt > now - 1000 && !autoFired.current;
+
+  // Synchronized start: count down, then everyone starts their run at the same moment.
+  useEffect(() => {
+    if (!autoStartAt || hud.running || hud.over || autoFired.current) return;
+    const iv = setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= autoStartAt && !autoFired.current) {
+        autoFired.current = true;
+        begin();
+      }
+    }, 100);
+    return () => clearInterval(iv);
+  }); // eslint-disable-line react-hooks/exhaustive-deps
 
   const begin = async () => {
     if (starting) return;
@@ -63,6 +88,18 @@ export const GameOverlays: React.FC<{
       setStarting(false);
     }
   };
+
+  if (countingDown && !starting) {
+    const secs = Math.max(0, Math.ceil((autoStartAt! - now) / 1000));
+    return (
+      <div className="absolute inset-0 bg-zinc-950/80 flex flex-col items-center justify-center text-center">
+        <p className="text-xs uppercase tracking-widest text-zinc-400 mb-2">Everyone starts together</p>
+        <span key={secs} className={`text-7xl font-black tabular-nums ${theme.accent} animate-countdown`}>
+          {secs > 0 ? secs : 'GO'}
+        </span>
+      </div>
+    );
+  }
 
   if (!hud.running && !hud.over) {
     return (

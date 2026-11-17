@@ -137,30 +137,9 @@ export const AuthLanding: React.FC = () => {
     <div className="h-[100dvh] w-screen bg-zinc-950 text-zinc-100 flex flex-col justify-between overflow-hidden relative select-none font-sans antialiased">
       {/* Dynamic Cyber Neon Glow Mesh */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
-        <motion.div
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.25, 0.4, 0.25],
-          }}
-          transition={{ duration: 8, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute -top-32 -left-32 w-[500px] h-[500px] bg-emerald-500/20 rounded-full blur-[140px]"
-        />
-        <motion.div
-          animate={{
-            scale: [1, 1.3, 1],
-            opacity: [0.2, 0.35, 0.2],
-          }}
-          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
-          className="absolute top-1/2 -right-32 w-[550px] h-[550px] bg-indigo-600/20 rounded-full blur-[160px]"
-        />
-        <motion.div
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.15, 0.3, 0.15],
-          }}
-          transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut', delay: 2 }}
-          className="absolute -bottom-32 left-1/3 w-[450px] h-[450px] bg-teal-500/15 rounded-full blur-[130px]"
-        />
+        <div className="absolute -top-32 -left-32 w-[500px] h-[500px] bg-emerald-500/20 rounded-full blur-[140px] opacity-30" />
+        <div className="absolute top-1/2 -right-32 w-[550px] h-[550px] bg-indigo-600/20 rounded-full blur-[160px] opacity-30" />
+        <div className="absolute -bottom-32 left-1/3 w-[450px] h-[450px] bg-teal-500/15 rounded-full blur-[130px] opacity-30" />
 
         {/* Floating Background Graphics */}
         <motion.div
@@ -171,7 +150,7 @@ export const AuthLanding: React.FC = () => {
           transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
           className="absolute top-16 left-6 sm:left-20 opacity-15 sm:opacity-25"
         >
-          <div className="p-6 rounded-3xl bg-zinc-900/60 border border-emerald-500/30 backdrop-blur-md shadow-2xl">
+          <div className="p-6 rounded-3xl bg-zinc-900/60 border border-emerald-500/30 shadow-2xl">
             <Gamepad2 className="w-16 h-16 sm:w-24 sm:h-24 text-emerald-400" />
           </div>
         </motion.div>
@@ -184,7 +163,7 @@ export const AuthLanding: React.FC = () => {
           transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut', delay: 0.5 }}
           className="absolute bottom-20 right-6 sm:right-20 opacity-15 sm:opacity-25"
         >
-          <div className="p-6 rounded-3xl bg-zinc-900/60 border border-indigo-500/30 backdrop-blur-md shadow-2xl">
+          <div className="p-6 rounded-3xl bg-zinc-900/60 border border-indigo-500/30 shadow-2xl">
             <Trophy className="w-16 h-16 sm:w-24 sm:h-24 text-indigo-400" />
           </div>
         </motion.div>

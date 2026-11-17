@@ -6,12 +6,17 @@ import Puzzle2048Game from '../games/Puzzle2048Game';
 import NeonDodgeGame from '../games/NeonDodgeGame';
 import { GAMES_LIST } from '../../data/initialData';
 import MorphingHeading from '../common/MorphingHeading';
-import MatchSocket from '../common/MatchSocket';
 import { randomSeed } from '../games/GameShell';
 import type { RunResult } from '../../hooks/useGameRun';
 import GameErrorBoundary from '../common/GameErrorBoundary';
 import MatchSummaryOverlay from './MatchSummaryOverlay';
 import { cr } from '../../utils/credits';
+import { supabase } from '../../lib/supabaseClient';
+import { useLiveMatch } from '../../hooks/useLiveMatch';
+import LiveScoreboard from './LiveScoreboard';
+
+/** Everyone's run starts this long after the host taps Start (time to get every player into the arena). */
+const SYNC_START_DELAY_MS = 6000;
 
 const PlayArenaModal: React.FC = () => {
   const {
@@ -22,6 +27,7 @@ const PlayArenaModal: React.FC = () => {
     beginRun,
     submitRun,
     pendingSubmissions,
+    user,
   } = useApp();
 
   const [activeTab, setActiveTab] = useState<'game' | 'leaderboard'>('game');
@@ -29,6 +35,23 @@ const PlayArenaModal: React.FC = () => {
 
   // True from the moment this device starts a run until it has been submitted.
   const [localRun, setLocalRun] = useState<'idle' | 'playing' | 'submitting'>('idle');
+
+  // Live view of the other players (display only; results come from server verification).
+  const matchId = activePlayingMatch?.id ?? null;
+  const liveRoom = matchId ? rooms.find((r) => r.id === matchId) ?? activePlayingMatch : null;
+  const live = useLiveMatch(matchId, { id: user.id, name: user.displayName }, liveRoom?.players.map((p) => p.id) ?? []);
+
+  // Server clock offset, so every device fires the synchronized start at the same moment.
+  const [clockOffset, setClockOffset] = useState<number | null>(null);
+  useEffect(() => {
+    setClockOffset(null);
+    if (!matchId || !supabase) return;
+    const t0 = Date.now();
+    supabase.rpc('server_time').then(({ data, error }) => {
+      const t1 = Date.now();
+      setClockOffset(error || !data ? 0 : new Date(data as string).getTime() + (t1 - t0) / 2 - t1);
+    });
+  }, [matchId]);
 
   // Each new match/practice session starts on the game, not on a stale summary.
   useEffect(() => {
@@ -81,6 +104,13 @@ const PlayArenaModal: React.FC = () => {
   const awaitingVerification = !!liveMatch && pendingSubmissions.includes(liveMatch.id);
   const interrupted = runElsewhere && liveMatch?.myRun === 'started' && !awaitingVerification;
   const showGame = isPractice || !runElsewhere;
+
+  const opponentIds = liveMatch ? liveMatch.players.filter((p) => !p.isCurrentUser).map((p) => p.id) : [];
+  const autoStartAt =
+    !isPractice && liveMatch?.status === 'in_progress' && liveMatch.startedAt && clockOffset !== null && !liveMatch.myRun
+      ? new Date(liveMatch.startedAt).getTime() + SYNC_START_DELAY_MS - clockOffset
+      : null;
+  const liveProps = isPractice ? {} : { live, opponentIds, autoStartAt };
 
   const getSeed = async (): Promise<number | null> => {
     if (isPractice || !liveMatch) return randomSeed();
@@ -139,9 +169,6 @@ const PlayArenaModal: React.FC = () => {
 
         {/* Realtime Socket Indicator & View Controls */}
         <div className="flex items-center gap-2">
-          {!isPractice && liveMatch && (
-            <MatchSocket matchId={liveMatch.id} className="hidden sm:inline-flex" />
-          )}
 
           {/* Mobile View Toggle Tabs (if match with leaderboard) */}
           {!isPractice && liveMatch && (
@@ -185,6 +212,9 @@ const PlayArenaModal: React.FC = () => {
             activeTab === 'leaderboard' && !isPractice ? 'hidden sm:flex' : 'flex'
           }`}
         >
+          {liveMatch && !isPractice && (
+            <LiveScoreboard room={liveMatch} live={live} scoreLabel={gameId === 'neondodge' ? (t) => `${(t / 60).toFixed(1)}s` : undefined} />
+          )}
           {interrupted && (
             <div className="w-full p-5 rounded-2xl bg-zinc-900 border border-amber-500/30 text-center">
               <p className="text-sm font-bold text-amber-300 mb-1">Your run was interrupted</p>
@@ -198,6 +228,7 @@ const PlayArenaModal: React.FC = () => {
           <GameErrorBoundary onReset={exitArena}>
             {gameId === 'snake' && (
               <SnakeGame
+                {...liveProps}
                 timeLimitSeconds={liveMatch?.durationSeconds || 60}
                 onFinish={handleFinish}
                 getSeed={getSeed}
@@ -206,6 +237,7 @@ const PlayArenaModal: React.FC = () => {
             )}
             {gameId === '2048' && (
               <Puzzle2048Game
+                {...liveProps}
                 timeLimitSeconds={liveMatch?.durationSeconds || 90}
                 onFinish={handleFinish}
                 getSeed={getSeed}
@@ -214,6 +246,7 @@ const PlayArenaModal: React.FC = () => {
             )}
             {gameId === 'neondodge' && (
               <NeonDodgeGame
+                {...liveProps}
                 timeLimitSeconds={liveMatch?.durationSeconds || 45}
                 onFinish={handleFinish}
                 getSeed={getSeed}
