@@ -1,0 +1,7 @@
+# Supabase CLI settings for this project (used by `supabase functions deploy`).
+project_id = "krhtlurqdfkzbxwrdowt"
+
+[functions.verify-run]
+# The function authenticates every caller itself (auth.getUser on the bearer token).
+# The gateway check is off because it rejects tokens signed with Supabase's newer JWT signing keys.
+verify_jwt = false
