@@ -35,6 +35,9 @@ interface AppContextType {
   isGuest: boolean;
   logout: () => Promise<void>;
   pendingInviteCode: string | null;
+  /** True after opening a password-reset link, until a new password is saved. */
+  passwordRecovery: boolean;
+  finishPasswordRecovery: () => void;
 
   currentTab: NavigationTab;
   setCurrentTab: (tab: NavigationTab) => void;
@@ -222,6 +225,7 @@ function mapRoom(m: any, players: any[], myId: string): MatchRoom {
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [authReady, setAuthReady] = useState(false);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   const [currentTab, setCurrentTabState] = useState<NavigationTab>('home');
   const [user, setUser] = useState<UserProfile>(EMPTY_USER);
@@ -285,7 +289,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSession(data.session);
       if (!data.session) setAuthReady(true);
     });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, next) => {
+      if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true);
       setSession(next);
       if (!next) {
         setUser(EMPTY_USER);
@@ -724,6 +729,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isGuest,
         logout,
         pendingInviteCode,
+        passwordRecovery,
+        finishPasswordRecovery: () => setPasswordRecovery(false),
         currentTab,
         setCurrentTab,
         user,

@@ -31,5 +31,12 @@ export function useAuth() {
     return data;
   };
 
-  return { isSupabaseConfigured, signUpWithEmail, signInWithEmail };
+  const requestPasswordReset = async (email: string) => {
+    const { error } = await requireClient().auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}${window.location.pathname}`,
+    });
+    if (error) throw error;
+  };
+
+  return { isSupabaseConfigured, signUpWithEmail, signInWithEmail, requestPasswordReset };
 }

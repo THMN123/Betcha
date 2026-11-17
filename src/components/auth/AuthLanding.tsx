@@ -22,7 +22,7 @@ import { useApp } from '../../context/AppContext';
 
 export const AuthLanding: React.FC = () => {
   const { showToast, pendingInviteCode } = useApp();
-  const { signInWithEmail, signUpWithEmail, isSupabaseConfigured } = useAuth();
+  const { signInWithEmail, signUpWithEmail, requestPasswordReset, isSupabaseConfigured } = useAuth();
   const [step, setStep] = useState<'welcome' | 'auth'>(() => (pendingInviteCode ? 'auth' : 'welcome'));
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
   const [email, setEmail] = useState('');
@@ -78,6 +78,28 @@ export const AuthLanding: React.FC = () => {
       } else {
         setAuthError(msg || 'Authentication failed. Please check your credentials.');
       }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleForgot = async () => {
+    setAuthError(null);
+    setSuccessInfo(null);
+    if (!email || !email.includes('@')) {
+      setAuthError('Type your email address above first, then tap "Forgot password?" again.');
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      await requestPasswordReset(email);
+      setSuccessInfo(`If ${email} has an account, a reset link is on its way. Open it on this device to choose a new password.`);
+    } catch (err: any) {
+      setAuthError(
+        /rate limit/i.test(err?.message || '')
+          ? 'Too many emails were sent recently. Please wait a while and try again.'
+          : err?.message || 'Could not send the reset email'
+      );
     } finally {
       setIsSubmitting(false);
     }
@@ -450,6 +472,17 @@ export const AuthLanding: React.FC = () => {
                     </span>
                   </button>
                 </form>
+
+                {authMode === 'signin' && (
+                  <button
+                    type="button"
+                    onClick={handleForgot}
+                    disabled={isSubmitting}
+                    className="mt-3 w-full text-center text-xs text-zinc-400 hover:text-emerald-400 underline underline-offset-2"
+                  >
+                    Forgot password?
+                  </button>
+                )}
 
                 <div className="my-4 flex items-center gap-3 text-[10px] font-mono uppercase text-zinc-500">
                   <div className="h-px flex-1 bg-zinc-800" />

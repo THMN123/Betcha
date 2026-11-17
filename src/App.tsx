@@ -9,6 +9,7 @@ import WalletView from './components/wallet/WalletView';
 import ProfileView from './components/profile/ProfileView';
 import PlayArenaModal from './components/arena/PlayArenaModal';
 import AuthLanding from './components/auth/AuthLanding';
+import SetNewPasswordModal from './components/auth/SetNewPasswordModal';
 
 const AppContent: React.FC = () => {
   const { currentTab, isAuthenticated, authReady } = useApp();
@@ -44,6 +45,7 @@ const AppContent: React.FC = () => {
 
       <BottomNavbar />
       <PlayArenaModal />
+      <SetNewPasswordModal />
     </div>
   );
 };
