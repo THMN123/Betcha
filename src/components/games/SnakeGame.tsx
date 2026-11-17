@@ -3,6 +3,8 @@ import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap } from 'lucide-react';
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
 import { peerColor } from '../../hooks/useLiveMatch';
+import { maxTicksFor } from '../../../supabase/functions/_shared/games/index.ts';
+import { useGhosts } from '../../games/useGhosts';
 import { snakeSim, SnakeAction, SNAKE_GRID, type SnakeState, type Cell } from '../../../supabase/functions/_shared/games/snake.ts';
 import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
 import { useCanvasLoop, glowDot, lerp } from './canvas';
@@ -15,7 +17,6 @@ const theme: Theme = {
 
 const SIZE = 320;
 const CELL = SIZE / SNAKE_GRID;
-const TICK_MS = snakeSim.tickMs;
 
 /** Grid is drawn once into an offscreen canvas, then blitted each frame. */
 let gridCache: HTMLCanvasElement | null = null;
@@ -65,24 +66,19 @@ function drawSnakeBody(ctx: CanvasRenderingContext2D, pts: { x: number; y: numbe
   glowDot(ctx, pts[0].x, pts[0].y, width * 0.62, head);
 }
 
-function unflatten(g: unknown): Cell[] | null {
-  if (!Array.isArray(g) || g.length < 2) return null;
-  const out: Cell[] = [];
-  for (let i = 0; i + 1 < g.length; i += 2) out.push({ x: Number(g[i]), y: Number(g[i + 1]) });
-  return out;
-}
-
 const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const prevSnake = useRef<Cell[] | null>(null);
+  // Opponents are drawn ~250ms in the past so their (batched) moves have arrived: no visible corrections.
+  const ghosts = useGhosts(snakeSim, live, maxTicksFor(snakeSim, timeLimitSeconds), 250);
 
   const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
     snakeSim,
     timeLimitSeconds,
     (r) => {
       soundFx.playGameOver();
-      const s = stateRef.current;
-      live?.send({ s: r.score, t: r.ticks, st: 'd', g: s ? s.snake.flatMap((c) => [c.x, c.y]) : undefined });
+      live?.finish(r.ticks);
+      live?.setMyScore(r.score, true);
       onFinish(r);
     },
     {
@@ -92,9 +88,11 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
       afterStep: (s, tick) => {
         if (s.ateBonus) soundFx.playCashChing();
         else if (s.ateFood) soundFx.playPickup();
-        // Broadcast every tick (~9/s): compact flat cell list.
-        live?.send({ s: s.score, t: tick, st: 'p', g: s.snake.flatMap((c) => [c.x, c.y]) });
+        live?.tick(tick);
+        live?.setMyScore(s.score, false);
       },
+      onStart: (seed) => ghosts.setSeed(seed),
+      onInput: (ev) => live?.input(ev),
     }
   );
 
@@ -102,25 +100,19 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
     ctx.drawImage(grid(), 0, 0, SIZE, SIZE);
     const s = stateRef.current;
 
-    // Opponents' ghosts (behind your own snake), interpolated between their last two updates.
-    if (live) {
-      for (const peer of live.peersRef.current.values()) {
-        const cur = unflatten(peer.g);
-        if (!cur) continue;
-        const prev = unflatten(peer.prevG);
-        const t = peer.st === 'd' ? 1 : Math.min(1, (now - peer.at) / TICK_MS);
-        const pts = interpolated(prev, cur, t);
-        const color = peerColor(peer.id, opponentIds);
-        ctx.globalAlpha = peer.st === 'd' ? 0.18 : 0.38;
-        drawSnakeBody(ctx, pts, color, color, CELL * 0.62);
-        ctx.globalAlpha = 1;
-        ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        // label above the head, or below it when the head is on the top row
-        const ly = pts[0].y < CELL * 1.5 ? pts[0].y + CELL * 1.25 : pts[0].y - CELL * 0.75;
-        ctx.fillText(peer.n, Math.min(SIZE - 20, Math.max(20, pts[0].x)), ly);
-      }
+    // Opponents' ghosts (behind your own snake), rebuilt locally from their inputs.
+    for (const g of ghosts.views(performance.now())) {
+      const pts = interpolated(g.done ? null : g.prev.snake, g.cur.snake, g.done ? 1 : g.frac);
+      const color = peerColor(g.id, opponentIds);
+      ctx.globalAlpha = g.done ? 0.18 : 0.38;
+      drawSnakeBody(ctx, pts, color, color, CELL * 0.62);
+      ctx.globalAlpha = 1;
+      ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      // label above the head, or below it when the head is on the top row
+      const ly = pts[0].y < CELL * 1.5 ? pts[0].y + CELL * 1.25 : pts[0].y - CELL * 0.75;
+      ctx.fillText(g.name, Math.min(SIZE - 20, Math.max(20, pts[0].x)), ly);
     }
 
     if (!s) return;

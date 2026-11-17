@@ -19,6 +19,10 @@ export interface RunHooks<S> {
   beforeStep?: (state: S) => void;
   /** Called after each step (sounds, live updates). */
   afterStep?: (state: S, tick: number) => void;
+  /** Called when a run starts, with its seed. */
+  onStart?: (seed: number) => void;
+  /** Called with every input exactly as it is recorded for the server. */
+  onInput?: (ev: InputEvent) => void;
 }
 
 /**
@@ -84,6 +88,7 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
       inputsRef.current = [];
       finishedRef.current = false;
       runningRef.current = true;
+      hooksRef.current.onStart?.(seed);
       publish();
       setVersion((v) => v + 1);
     },
@@ -94,7 +99,9 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
     (code: number) => {
       const s = stateRef.current;
       if (!s || !runningRef.current || finishedRef.current || ticksRef.current >= maxTicks || sim.isOver(s)) return;
-      inputsRef.current.push([ticksRef.current, code]);
+      const ev: InputEvent = [ticksRef.current, code];
+      inputsRef.current.push(ev);
+      hooksRef.current.onInput?.(ev);
       sim.applyInput(s, code);
       if (sim.isOver(s)) finish();
       else publish();

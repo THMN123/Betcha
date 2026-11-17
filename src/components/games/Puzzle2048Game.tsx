@@ -3,6 +3,8 @@ import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Sparkles } from 'lucide-reac
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
 import { g2048Sim, Move2048 } from '../../../supabase/functions/_shared/games/g2048.ts';
+import { maxTicksFor } from '../../../supabase/functions/_shared/games/index.ts';
+import { useGhosts } from '../../games/useGhosts';
 import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
 
 const theme: Theme = {
@@ -29,20 +31,30 @@ const EMPTY_BOARD = Array.from({ length: 4 }, () => Array(4).fill(0));
 
 const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, autoStartAt }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
-  const { stateRef, ticksRef, hud, start, sendInput } = useGameRun(g2048Sim, timeLimitSeconds, (r) => {
-    soundFx.playGameOver();
-    live?.send({ s: r.score, t: r.ticks, st: 'd' });
-    onFinish(r);
-  });
+  // Opponents' boards are rebuilt from their moves; we only show their score.
+  const ghosts = useGhosts(g2048Sim, live, maxTicksFor(g2048Sim, timeLimitSeconds), 0);
+  const { stateRef, hud, start, sendInput } = useGameRun(
+    g2048Sim,
+    timeLimitSeconds,
+    (r) => {
+      soundFx.playGameOver();
+      live?.finish(r.ticks);
+      live?.setMyScore(r.score, true);
+      onFinish(r);
+    },
+    {
+      afterStep: (_s, tick) => live?.tick(tick),
+      onStart: (seed) => ghosts.setSeed(seed),
+      onInput: (ev) => live?.input(ev),
+    }
+  );
 
   const move = (code: number) => {
     const before = stateRef.current?.score ?? 0;
     sendInput(code);
     const after = stateRef.current?.score ?? 0;
-    if (after > before) {
-      soundFx.playMerge();
-      live?.send({ s: after, t: ticksRef.current, st: 'p' });
-    }
+    if (after > before) soundFx.playMerge();
+    live?.setMyScore(after, false);
   };
 
   useEffect(() => {

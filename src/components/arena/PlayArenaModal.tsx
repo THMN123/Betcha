@@ -39,7 +39,9 @@ const PlayArenaModal: React.FC = () => {
   // Live view of the other players (display only; results come from server verification).
   const matchId = activePlayingMatch?.id ?? null;
   const liveRoom = matchId ? rooms.find((r) => r.id === matchId) ?? activePlayingMatch : null;
-  const live = useLiveMatch(matchId, { id: user.id, name: user.displayName }, liveRoom?.players.map((p) => p.id) ?? []);
+  // How often batched moves go out: Neon Dodge ghosts are drawn in real time, so it batches tighter.
+  const batchMs = liveRoom?.gameId === 'neondodge' ? 100 : liveRoom?.gameId === '2048' ? 300 : 200;
+  const live = useLiveMatch(matchId, { id: user.id, name: user.displayName }, liveRoom?.players.map((p) => p.id) ?? [], batchMs);
 
   // Server clock offset, so every device fires the synchronized start at the same moment.
   const [clockOffset, setClockOffset] = useState<number | null>(null);

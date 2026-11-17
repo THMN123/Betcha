@@ -14,6 +14,8 @@ import {
   DODGE_OBSTACLE_HEIGHT,
   DODGE_OBSTACLE_INSET,
 } from '../../../supabase/functions/_shared/games/neondodge.ts';
+import { maxTicksFor } from '../../../supabase/functions/_shared/games/index.ts';
+import { useGhosts } from '../../games/useGhosts';
 import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
 import { useCanvasLoop, glowDot, lerp } from './canvas';
 
@@ -23,18 +25,19 @@ const theme: Theme = {
   badge: 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
 };
 const COLORS = ['#f43f5e', '#fb7185', '#ec4899'];
-const LIVE_EVERY_TICKS = 6; // ~10 updates/s
-const LIVE_INTERVAL_MS = LIVE_EVERY_TICKS * neonDodgeSim.tickMs;
 
 const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
   const prevX = useRef<number | null>(null);
+  // Same walls for everyone (shared seed + synchronized start): draw opponents' orbs at "now".
+  const ghosts = useGhosts(neonDodgeSim, live, maxTicksFor(neonDodgeSim, timeLimitSeconds), 0);
 
   const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
     neonDodgeSim,
     timeLimitSeconds,
     (r) => {
       soundFx.playGameOver();
-      live?.send({ s: r.score, t: r.ticks, st: 'd', g: stateRef.current?.x });
+      live?.finish(r.ticks);
+      live?.setMyScore(r.score, true);
       onFinish(r);
     },
     {
@@ -43,8 +46,11 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
       },
       afterStep: (s, tick) => {
         if (s.passedThisTick > 0) soundFx.playPickup();
-        if (tick % LIVE_EVERY_TICKS === 0) live?.send({ s: s.tick, t: tick, st: 'p', g: s.x });
+        live?.tick(tick);
+        if (tick % 6 === 0) live?.setMyScore(s.tick, false);
       },
+      onStart: (seed) => ghosts.setSeed(seed),
+      onInput: (ev) => live?.input(ev),
     }
   );
 
@@ -78,18 +84,14 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
     }
 
     // Opponents' orbs (ghosts).
-    if (live) {
-      for (const peer of live.peersRef.current.values()) {
-        if (typeof peer.g !== 'number') continue;
-        const from = typeof peer.prevG === 'number' ? peer.prevG : peer.g;
-        const k = peer.st === 'd' ? 1 : Math.min(1, (now - peer.at) / LIVE_INTERVAL_MS);
-        const color = peerColor(peer.id, opponentIds);
-        glowDot(ctx, lerp(from, peer.g, k), DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS * 0.85, color, peer.st === 'd' ? 0.25 : 0.55);
-        ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
-        ctx.fillStyle = color;
-        ctx.textAlign = 'center';
-        ctx.fillText(peer.n, lerp(from, peer.g, k), DODGE_PLAYER_Y + DODGE_PLAYER_RADIUS + 12);
-      }
+    for (const g of ghosts.views(performance.now())) {
+      const gx = g.done ? g.cur.x : lerp(g.prev.x, g.cur.x, g.frac);
+      const color = peerColor(g.id, opponentIds);
+      glowDot(ctx, gx, DODGE_PLAYER_Y, DODGE_PLAYER_RADIUS * 0.85, color, g.done ? 0.25 : 0.55);
+      ctx.font = '600 9px "Plus Jakarta Sans", sans-serif';
+      ctx.fillStyle = color;
+      ctx.textAlign = 'center';
+      ctx.fillText(g.name, gx, DODGE_PLAYER_Y + DODGE_PLAYER_RADIUS + 12);
     }
 
     if (s) {

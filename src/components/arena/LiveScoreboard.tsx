@@ -10,10 +10,10 @@ const LiveScoreboard: React.FC<{ room: MatchRoom; live: LiveFeed; scoreLabel?: (
   const fmt = scoreLabel ?? ((s: number) => s.toLocaleString());
 
   const rows = room.players.map((p) => {
-    const peer = p.isCurrentUser ? live.self : live.peers.find((x) => x.id === p.id);
+    const lv = live.scores.find((x) => x.id === p.id);
     const verified = p.score !== undefined; // server-verified final score
-    const score = peer ? peer.s : verified ? p.score! : null;
-    const status = peer ? (peer.st === 'd' ? 'finished' : 'playing') : verified ? 'finished' : 'waiting';
+    const score = verified && (!lv || lv.done) ? p.score! : lv ? lv.score : null;
+    const status = verified || lv?.done ? 'finished' : lv ? 'playing' : 'waiting';
     return { id: p.id, name: p.isCurrentUser ? 'You' : p.name, me: !!p.isCurrentUser, score, status };
   });
   rows.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
