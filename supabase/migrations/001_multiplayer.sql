@@ -6,6 +6,98 @@
 -- the SECURITY DEFINER functions below; clients can read tables but never write them directly.
 
 -- ---------------------------------------------------------------------------
+-- Move aside tables left by earlier versions of the app that have a different shape.
+-- Nothing is deleted: an incompatible table is renamed to <name>_legacy (with its
+-- constraints and indexes) so the new table can be created next to it.
+-- ---------------------------------------------------------------------------
+
+do $$
+declare
+  t text;
+  req text[];
+  missing int;
+  new_name text;
+  r record;
+begin
+  -- Old code (e.g. an earlier view) may sit on top of these tables.
+  drop view if exists public.leaderboard;
+
+  -- Order matters: a table that references a renamed table is moved too.
+  foreach t in array array['profiles', 'matches', 'match_players', 'transactions'] loop
+    req := case t
+      when 'matches' then array['id','invite_code','title','game_id','host_id','host_name','buy_in','max_players',
+                                'distribution','duration_seconds','status','total_pot','platform_fee','net_prize_pool',
+                                'winner_id','winner_name','created_at','started_at','settled_at']
+      when 'match_players' then array['match_id','player_id','name','avatar','is_host','is_ready','score',
+                                      'completed_at','rank','payout','joined_at']
+      when 'transactions' then array['id','user_id','type','amount','match_id','description','status','created_at']
+      else array['id'] -- profiles: new columns are added below, only the key must match
+    end;
+
+    if to_regclass('public.' || t) is null then
+      continue;
+    end if;
+
+    select count(*) into missing
+      from unnest(req) c
+     where not exists (
+       select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = t and column_name = c
+     );
+
+    -- profiles.id must be a uuid that matches auth.users
+    if t = 'profiles' and missing = 0 and exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = 'profiles' and column_name = 'id' and data_type <> 'uuid'
+    ) then
+      missing := 1;
+    end if;
+
+    -- matches.id must be text (ids look like BTC-1234)
+    if t = 'matches' and missing = 0 and exists (
+      select 1 from information_schema.columns
+       where table_schema = 'public' and table_name = 'matches' and column_name = 'id' and data_type <> 'text'
+    ) then
+      missing := 1;
+    end if;
+
+    -- Still points at a table that was just moved aside -> move this one too.
+    if missing = 0 and exists (
+      select 1 from pg_constraint c
+       where c.conrelid = ('public.' || t)::regclass and c.contype = 'f'
+         and c.confrelid::regclass::text ~ '_legacy'
+    ) then
+      missing := 1;
+    end if;
+
+    if missing > 0 then
+      new_name := t || '_legacy';
+      while to_regclass('public.' || new_name) is not null loop
+        new_name := new_name || '_old';
+      end loop;
+
+      -- Free up constraint/index names (e.g. matches_pkey) for the new table.
+      for r in
+        select conname from pg_constraint
+         where conrelid = ('public.' || t)::regclass and contype in ('p', 'u', 'x', 'f', 'c')
+      loop
+        execute format('alter table public.%I rename constraint %I to %I', t, r.conname, left(r.conname || '_' || new_name, 63));
+      end loop;
+      for r in
+        select indexname from pg_indexes
+         where schemaname = 'public' and tablename = t
+           and indexname not in (select conname from pg_constraint where conrelid = ('public.' || t)::regclass)
+      loop
+        execute format('alter index public.%I rename to %I', r.indexname, left(r.indexname || '_' || new_name, 63));
+      end loop;
+
+      execute format('alter table public.%I rename to %I', t, new_name);
+      raise notice 'Renamed incompatible table public.% to public.%', t, new_name;
+    end if;
+  end loop;
+end $$;
+
+-- ---------------------------------------------------------------------------
 -- Tables
 -- ---------------------------------------------------------------------------
 
@@ -25,6 +117,26 @@ alter table public.profiles add column if not exists matches_played int not null
 alter table public.profiles add column if not exists wins_count int not null default 0;
 alter table public.profiles add column if not exists last_credit_claim timestamptz;
 alter table public.profiles add column if not exists created_at timestamptz not null default now();
+alter table public.profiles add column if not exists email text;
+alter table public.profiles add column if not exists display_name text;
+alter table public.profiles add column if not exists handle text;
+alter table public.profiles add column if not exists avatar_url text;
+alter table public.profiles add column if not exists updated_at timestamptz default now();
+
+-- An older profiles table may have extra required columns this app never fills in
+-- (e.g. a NOT NULL username). Relax those so profile creation can't fail on them.
+do $$
+declare r record;
+begin
+  for r in
+    select column_name from information_schema.columns
+     where table_schema = 'public' and table_name = 'profiles'
+       and is_nullable = 'NO' and column_default is null
+       and column_name not in ('id')
+  loop
+    execute format('alter table public.profiles alter column %I drop not null', r.column_name);
+  end loop;
+end $$;
 
 create table if not exists public.matches (
   id text primary key,                       -- e.g. BTC-4821
