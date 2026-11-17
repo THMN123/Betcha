@@ -19,6 +19,7 @@ import WithdrawModal from '../common/WithdrawModal';
 import { TransactionType } from '../../types';
 import MorphingHeading from '../common/MorphingHeading';
 import { WalletSkeleton } from '../common/SkeletonLoader';
+import { cr } from '../../utils/credits';
 
 const WalletView: React.FC = () => {
   const { user, transactions, escrowLedger } = useApp();
@@ -74,9 +75,9 @@ const WalletView: React.FC = () => {
             </span>
             <div className="flex items-baseline gap-2">
               <MorphingHeading as="span" glowColor="emerald" className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight">
-                ${user.balance.toFixed(2)}
+                {cr(user.balance)}
               </MorphingHeading>
-              <span className="text-xs font-semibold text-emerald-400 font-mono">USD</span>
+              <span className="text-xs font-semibold text-emerald-400 font-mono">play credits</span>
             </div>
           </div>
 
@@ -87,7 +88,7 @@ const WalletView: React.FC = () => {
                 <Lock className="w-3 h-3" />
                 <span>In-Escrow Locked</span>
               </span>
-              <span className="text-base font-bold text-white">${user.escrowLocked.toFixed(2)}</span>
+              <span className="text-base font-bold text-white">{cr(user.escrowLocked)}</span>
             </div>
 
             <div>
@@ -95,7 +96,7 @@ const WalletView: React.FC = () => {
                 <TrendingUp className="w-3 h-3" />
                 <span>Total Lifetime Winnings</span>
               </span>
-              <span className="text-base font-bold text-white">${user.totalEarnings.toFixed(2)}</span>
+              <span className="text-base font-bold text-white">{cr(user.totalEarnings)}</span>
             </div>
           </div>
 
@@ -107,7 +108,7 @@ const WalletView: React.FC = () => {
               className="py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
             >
               <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Deposit Funds</span>
+              <span>Free Credits</span>
             </button>
 
             <button
@@ -116,7 +117,7 @@ const WalletView: React.FC = () => {
               className="py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-white font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all"
             >
               <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-              <span>Withdraw Winnings</span>
+              <span>Cash Out?</span>
             </button>
           </div>
         </div>
@@ -228,7 +229,7 @@ const WalletView: React.FC = () => {
                         isPositive ? 'text-emerald-400' : 'text-zinc-300'
                       }`}
                     >
-                      {isPositive ? `+$${tx.amount.toFixed(2)}` : `-$${Math.abs(tx.amount).toFixed(2)}`}
+                      {isPositive ? `+${cr(tx.amount)}` : `-${cr(Math.abs(tx.amount))}`}
                     </span>
                   </div>
                 </div>
@@ -275,16 +276,16 @@ const WalletView: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2 text-xs text-zinc-400 pt-2 border-t border-zinc-850">
                   <div>
                     <span className="block text-[10px] text-zinc-500 uppercase">Gross Locked</span>
-                    <span className="font-bold text-white">${esc.totalLocked.toFixed(2)}</span>
+                    <span className="font-bold text-white">{cr(esc.totalLocked)}</span>
                   </div>
                   <div>
                     <span className="block text-[10px] text-amber-400 uppercase">5% Spread Fee</span>
-                    <span className="font-bold text-amber-400">${esc.platformFeeHeld.toFixed(2)}</span>
+                    <span className="font-bold text-amber-400">{cr(esc.platformFeeHeld)}</span>
                   </div>
                   <div className="text-right">
                     <span className="block text-[10px] text-emerald-400 uppercase">Net Release Pot</span>
                     <span className="font-bold text-emerald-400">
-                      ${(esc.totalLocked - esc.platformFeeHeld).toFixed(2)}
+                      {cr((esc.totalLocked - esc.platformFeeHeld))}
                     </span>
                   </div>
                 </div>

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Wallet, Volume2, VolumeX, Sparkles, Plus, Flame } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import DepositModal from './DepositModal';
+import { cr } from '../../utils/credits';
 
 const Header: React.FC = () => {
   const { user, soundEnabled, toggleSound, setCurrentTab } = useApp();
@@ -47,7 +48,7 @@ const Header: React.FC = () => {
               <div className="flex flex-col items-start leading-none">
                 <span className="text-[10px] text-zinc-400 uppercase font-semibold">Balance</span>
                 <span className="text-xs font-bold text-emerald-400 font-mono">
-                  ${user.balance.toFixed(2)}
+                  {cr(user.balance)}
                 </span>
               </div>
               

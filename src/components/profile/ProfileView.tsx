@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import MorphingHeading from '../common/MorphingHeading';
+import { cr } from '../../utils/credits';
 
 const ProfileView: React.FC = () => {
   const { user, rooms, logout } = useApp();
@@ -90,7 +91,7 @@ const ProfileView: React.FC = () => {
           <span className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
             Total Winnings
           </span>
-          <span className="text-2xl font-black text-emerald-400">${user.totalEarnings.toFixed(2)}</span>
+          <span className="text-2xl font-black text-emerald-400">{cr(user.totalEarnings)}</span>
         </div>
       </div>
 
@@ -168,14 +169,14 @@ const ProfileView: React.FC = () => {
                 <div>
                   <span className="font-bold text-white block">{match.title}</span>
                   <span className="text-[10px] text-zinc-400">
-                    Buy-In: ${match.buyIn} • Status: {match.status}
+                    Buy-in: {cr(match.buyIn)} • Status: {match.status.replace('_', ' ')}
                   </span>
                 </div>
 
                 <div className="text-right">
                   {match.winnerId === user.id ? (
                     <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                      Won +${match.netPrizePool.toFixed(2)}
+                      Won +{cr(match.netPrizePool)}
                     </span>
                   ) : (
                     <span className="text-xs font-semibold text-zinc-400">Completed</span>

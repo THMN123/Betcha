@@ -10,15 +10,13 @@ import MatchSocket from '../common/MatchSocket';
 import useGameConnector from '../../hooks/useGameConnector';
 import GameErrorBoundary from '../common/GameErrorBoundary';
 import MatchSummaryOverlay from './MatchSummaryOverlay';
+import { cr } from '../../utils/credits';
 
 const PlayArenaModal: React.FC = () => {
   const {
     activePlayingMatch,
     practiceGameId,
     exitArena,
-    submitMatchScore,
-    simulateFriendRuns,
-    user,
     rooms,
   } = useApp();
 
@@ -26,6 +24,12 @@ const PlayArenaModal: React.FC = () => {
   const [showSummary, setShowSummary] = useState<boolean>(false);
 
   const { reportScore, startGame } = useGameConnector();
+
+  // Each new match/practice session starts on the game, not on a stale summary.
+  useEffect(() => {
+    setShowSummary(false);
+    setActiveTab('game');
+  }, [activePlayingMatch?.id, practiceGameId]);
 
   // Lock body scroll and prevent pull-to-refresh/viewport bounce when playing in Arena
   useEffect(() => {
@@ -67,18 +71,24 @@ const PlayArenaModal: React.FC = () => {
     ? rooms.find((r) => r.id === activePlayingMatch.id) || activePlayingMatch
     : null;
 
-  const handleScoreSubmission = (finalScore: number) => {
-    reportScore({
-      matchId: liveMatch?.id,
-      gameId,
-      score: finalScore,
-      isPractice,
-    });
+  const myEntry = liveMatch?.players.find((p) => p.isCurrentUser);
+  const alreadySubmitted = !isPractice && myEntry?.score !== undefined;
 
-    if (liveMatch) {
-      submitMatchScore(liveMatch.id, finalScore);
-      setShowSummary(true);
+  const handleScoreSubmission = (finalScore: number) => {
+    reportScore({ matchId: liveMatch?.id, gameId, score: finalScore, isPractice });
+    if (liveMatch) setShowSummary(true);
+  };
+
+  const handleExit = () => {
+    if (
+      liveMatch &&
+      liveMatch.status === 'in_progress' &&
+      !alreadySubmitted &&
+      !window.confirm("Leave without finishing? You can come back from the lobby, but if time runs out you'll score 0.")
+    ) {
+      return;
     }
+    exitArena();
   };
 
   return (
@@ -107,7 +117,7 @@ const PlayArenaModal: React.FC = () => {
               )}
             </div>
             <p className="text-[10px] sm:text-[11px] text-zinc-400">
-              {isPractice ? 'Free practice run • Unlimited tries' : `$${liveMatch?.buyIn} Buy-In • $${liveMatch?.netPrizePool.toFixed(2)} Net Prize Pot`}
+              {isPractice ? 'Free practice run • Unlimited tries' : `${cr(liveMatch?.buyIn ?? 0)} buy-in • ${cr(liveMatch?.netPrizePool ?? 0)} prize`}
             </p>
           </div>
         </div>
@@ -144,7 +154,7 @@ const PlayArenaModal: React.FC = () => {
 
           <button
             type="button"
-            onClick={exitArena}
+            onClick={handleExit}
             className="p-1.5 sm:p-2 text-zinc-400 hover:text-white rounded-xl bg-zinc-800/80 hover:bg-zinc-800 transition-colors shrink-0"
           >
             <X className="w-5 h-5" />
@@ -160,6 +170,7 @@ const PlayArenaModal: React.FC = () => {
             activeTab === 'leaderboard' && !isPractice ? 'hidden sm:flex' : 'flex'
           }`}
         >
+          {alreadySubmitted ? null : (
           <GameErrorBoundary onReset={exitArena}>
             {gameId === 'snake' && (
               <SnakeGame
@@ -183,6 +194,7 @@ const PlayArenaModal: React.FC = () => {
               />
             )}
           </GameErrorBoundary>
+          )}
         </div>
 
         {/* Live Tournament Leaderboard Side Panel */}
@@ -240,7 +252,7 @@ const PlayArenaModal: React.FC = () => {
                         </span>
                         {player.payout !== undefined && player.payout > 0 && (
                           <span className="text-[10px] font-bold text-amber-400">
-                            Won +${player.payout.toFixed(2)}
+                            Won +{cr(player.payout)}
                           </span>
                         )}
                       </div>
@@ -254,21 +266,6 @@ const PlayArenaModal: React.FC = () => {
               ))}
             </div>
 
-            {/* Simulated Opponents Runs CTA */}
-            {liveMatch.status !== 'completed' && (
-              <button
-                type="button"
-                onClick={() => {
-                  simulateFriendRuns(liveMatch.id);
-                  setShowSummary(true);
-                }}
-                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md flex items-center justify-center gap-2 transition-colors"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>Settle Match & View Summary</span>
-              </button>
-            )}
-
             {liveMatch.status === 'completed' && (
               <button
                 type="button"
@@ -277,18 +274,16 @@ const PlayArenaModal: React.FC = () => {
               >
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 mx-auto mb-1" />
                 <p className="text-xs font-bold text-emerald-300">
-                  Match Settled! Winner: {liveMatch.winnerName}
+                  Match over! Winner: {liveMatch.winnerName}
                 </p>
-                <p className="text-[10px] text-zinc-400 underline mt-0.5">
-                  Click to view full financial summary & payouts
-                </p>
+                <p className="text-[10px] text-zinc-400 underline mt-0.5">Tap to see results & payouts</p>
               </button>
             )}
           </div>
         )}
 
         {/* End of Match Summary Overlay */}
-        {showSummary && liveMatch && (
+        {(showSummary || alreadySubmitted) && liveMatch && (
           <MatchSummaryOverlay
             room={liveMatch}
             onClose={() => {

@@ -1,25 +1,19 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import type { Session } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
 import {
   NavigationTab,
   UserProfile,
   MatchRoom,
+  MatchPlayer,
   WalletTransaction,
   EscrowEntry,
   LeaderboardEntry,
   GameId,
 } from '../types';
-import {
-  INITIAL_USER,
-  INITIAL_ROOMS,
-  INITIAL_TRANSACTIONS,
-  INITIAL_ESCROW,
-  TOP_LEADERBOARD,
-  GAMES_LIST,
-  MOCK_FRIENDS,
-} from '../data/initialData';
+import { GAMES_LIST } from '../data/initialData';
 import { soundFx } from '../utils/audio';
-import { supabase, syncUserProfileToSupabase } from '../lib/supabaseClient';
+import { supabase } from '../lib/supabaseClient';
 
 interface Toast {
   id: string;
@@ -27,11 +21,15 @@ interface Toast {
   type: 'success' | 'info' | 'warning' | 'error';
 }
 
+type Distribution = 'winner_takes_all' | 'top_two';
+
 interface AppContextType {
+  authReady: boolean;
   isAuthenticated: boolean;
-  loginWithEmail: (email: string, displayName?: string) => void;
-  loginWithOAuth: (provider: 'google' | 'guest') => void;
-  logout: () => void;
+  isGuest: boolean;
+  logout: () => Promise<void>;
+  pendingInviteCode: string | null;
+
   currentTab: NavigationTab;
   setCurrentTab: (tab: NavigationTab) => void;
   user: UserProfile;
@@ -40,73 +38,171 @@ interface AppContextType {
   escrowLedger: EscrowEntry[];
   leaderboard: LeaderboardEntry[];
   toast: Toast | null;
-  showToast: (message: string, type?: 'success' | 'info' | 'warning' | 'error') => void;
-  
-  // Active playing match / practice
+  showToast: (message: string, type?: Toast['type']) => void;
+
   activePlayingMatch: MatchRoom | null;
   practiceGameId: GameId | null;
   startPractice: (gameId: GameId) => void;
   enterMatchArena: (match: MatchRoom) => void;
   exitArena: () => void;
-  
-  // Actions
+
   createMatch: (config: {
     gameId: GameId;
     title: string;
     buyIn: number;
     maxPlayers: number;
-    distribution: 'winner_takes_all' | 'top_two';
-  }) => MatchRoom | null;
-  
-  joinMatch: (roomId: string) => boolean;
-  togglePlayerReady: (roomId: string) => void;
-  startMatchLobby: (roomId: string) => void;
-  submitMatchScore: (roomId: string, score: number) => void;
-  simulateFriendRuns: (roomId: string) => void;
-  
-  // Wallet
-  depositFunds: (amount: number) => void;
-  withdrawFunds: (amount: number) => boolean;
-  
-  // Sound & Switcher
+    distribution: Distribution;
+  }) => Promise<MatchRoom | null>;
+  joinMatch: (roomIdOrCode: string) => Promise<boolean>;
+  leaveMatch: (roomId: string) => Promise<void>;
+  togglePlayerReady: (roomId: string) => Promise<void>;
+  startMatchLobby: (roomId: string) => Promise<void>;
+  submitMatchScore: (roomId: string, score: number) => Promise<void>;
+  settleMatch: (roomId: string) => Promise<void>;
+
+  claimFreeCredits: () => Promise<boolean>;
+  canClaimCreditsAt: Date | null;
+
   soundEnabled: boolean;
   toggleSound: () => void;
-  switchUserAccount: (handle: string) => void;
-  
-  // Selected Room detail modal/view
+
   selectedRoomId: string | null;
   setSelectedRoomId: (id: string | null) => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
+const PENDING_INVITE_KEY = 'betcha_pending_invite';
+
+const EMPTY_USER: UserProfile = {
+  id: '',
+  handle: '',
+  displayName: '',
+  avatar: '',
+  balance: 0,
+  escrowLocked: 0,
+  totalEarnings: 0,
+  matchesPlayed: 0,
+  winsCount: 0,
+  winRate: 0,
+  favoriteGame: 'Cyber Snake',
+  vipTier: 'Rookie',
+  badges: [],
+};
+
+function safeStorage<T>(fn: () => T, fallback: T): T {
+  try {
+    return fn();
+  } catch {
+    return fallback;
+  }
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+function relativeTime(iso: string): string {
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.round(hours / 24)}d ago`;
+}
+
+function vipTierFor(wins: number): UserProfile['vipTier'] {
+  if (wins >= 50) return 'Legend';
+  if (wins >= 15) return 'High Roller';
+  if (wins >= 3) return 'Contender';
+  return 'Rookie';
+}
+
+function errorMessage(err: unknown): string {
+  if (err && typeof err === 'object' && 'message' in err) return String((err as { message: string }).message);
+  return 'Something went wrong. Please try again.';
+}
+
+function mapProfile(row: any, isGuest: boolean): UserProfile {
+  const played = row.matches_played ?? 0;
+  const wins = row.wins_count ?? 0;
+  return {
+    id: row.id,
+    handle: row.handle ?? '',
+    displayName: row.display_name ?? 'Player',
+    avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/bottts/svg?seed=${row.id}`,
+    balance: Number(row.balance ?? 0),
+    escrowLocked: Number(row.escrow_locked ?? 0),
+    totalEarnings: Number(row.total_earnings ?? 0),
+    matchesPlayed: played,
+    winsCount: wins,
+    winRate: played ? Number(((wins / played) * 100).toFixed(1)) : 0,
+    favoriteGame: 'Cyber Snake',
+    vipTier: vipTierFor(wins),
+    badges: [
+      isGuest
+        ? { id: 'guest', title: 'Guest Player', description: 'Playing without an account', icon: 'User', unlocked: true }
+        : { id: 'verified', title: 'Verified Member', description: row.email ? `Signed in as ${row.email}` : 'Signed in', icon: 'ShieldCheck', unlocked: true },
+      { id: 'first_win', title: 'First Blood', description: 'Win your first match', icon: 'Trophy', unlocked: wins >= 1 },
+    ],
+  };
+}
+
+function mapRoom(m: any, players: any[], myId: string): MatchRoom {
+  const mapped: MatchPlayer[] = players
+    .filter((p) => p.match_id === m.id)
+    .sort((a, b) => (a.is_host === b.is_host ? a.joined_at.localeCompare(b.joined_at) : a.is_host ? -1 : 1))
+    .map((p) => ({
+      id: p.player_id,
+      name: p.name,
+      avatar: p.avatar ?? `https://api.dicebear.com/7.x/bottts/svg?seed=${p.player_id}`,
+      isHost: p.is_host,
+      isReady: p.is_ready,
+      score: p.score ?? undefined,
+      completedAt: p.completed_at ?? undefined,
+      rank: p.rank ?? undefined,
+      payout: p.payout !== null && p.payout !== undefined ? Number(p.payout) : undefined,
+      isCurrentUser: p.player_id === myId,
+    }));
+
+  return {
+    id: m.id,
+    title: m.title,
+    gameId: m.game_id,
+    hostId: m.host_id,
+    hostName: m.host_name,
+    buyIn: Number(m.buy_in),
+    maxPlayers: m.max_players,
+    players: mapped,
+    status: m.status,
+    createdAt: relativeTime(m.created_at),
+    startedAt: m.started_at ?? undefined,
+    spreadPercent: 5,
+    totalPot: Number(m.total_pot),
+    platformFee: Number(m.platform_fee),
+    netPrizePool: Number(m.net_prize_pool),
+    distribution: m.distribution,
+    durationSeconds: m.duration_seconds,
+    inviteCode: m.invite_code,
+    winnerId: m.winner_id ?? undefined,
+    winnerName: m.winner_name ?? undefined,
+  };
+}
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('betcha_auth') === 'true';
-  });
+  const [session, setSession] = useState<Session | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const [currentTab, setCurrentTabState] = useState<NavigationTab>('home');
-  const [user, setUser] = useState<UserProfile>(() => {
-    const saved = localStorage.getItem('betcha_user');
-    return saved ? JSON.parse(saved) : INITIAL_USER;
-  });
-  
-  const [rooms, setRooms] = useState<MatchRoom[]>(() => {
-    const saved = localStorage.getItem('betcha_rooms');
-    return saved ? JSON.parse(saved) : INITIAL_ROOMS;
-  });
-
-  const [transactions, setTransactions] = useState<WalletTransaction[]>(() => {
-    const saved = localStorage.getItem('betcha_tx');
-    return saved ? JSON.parse(saved) : INITIAL_TRANSACTIONS;
-  });
-
-  const [escrowLedger, setEscrowLedger] = useState<EscrowEntry[]>(() => {
-    const saved = localStorage.getItem('betcha_escrow');
-    return saved ? JSON.parse(saved) : INITIAL_ESCROW;
-  });
-
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(TOP_LEADERBOARD);
+  const [user, setUser] = useState<UserProfile>(EMPTY_USER);
+  const [lastCreditClaim, setLastCreditClaim] = useState<string | null>(null);
+  const [rooms, setRooms] = useState<MatchRoom[]>([]);
+  const [transactions, setTransactions] = useState<WalletTransaction[]>([]);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
   const [activePlayingMatch, setActivePlayingMatch] = useState<MatchRoom | null>(null);
   const [practiceGameId, setPracticeGameId] = useState<GameId | null>(null);
@@ -114,99 +210,187 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [toast, setToast] = useState<Toast | null>(null);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  const [pendingInviteCode, setPendingInviteCode] = useState<string | null>(() =>
+    safeStorage(() => localStorage.getItem(PENDING_INVITE_KEY), null)
+  );
 
-  // Sync state to localstorage
-  useEffect(() => {
-    localStorage.setItem('betcha_auth', String(isAuthenticated));
-  }, [isAuthenticated]);
+  const myId = session?.user.id ?? '';
+  const isGuest = Boolean(session?.user.is_anonymous);
+  const isAuthenticated = Boolean(session) && Boolean(user.id);
 
-  // Handle URL invite parameter (?room=BETCHA-XXXX)
-  useEffect(() => {
-    if (!isAuthenticated) return;
-    if (typeof window === 'undefined') return;
-
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get('room');
-    if (!roomParam) return;
-
-    let targetRoom = rooms.find(
-      (r) => r.inviteCode.toUpperCase() === roomParam.toUpperCase() || r.id.toUpperCase() === roomParam.toUpperCase()
-    );
-
-    if (!targetRoom) {
-      const roomNumStr = roomParam.replace(/[^0-9]/g, '') || Math.floor(1000 + Math.random() * 9000).toString();
-      const roomNum = parseInt(roomNumStr) || 1234;
-      const game = GAMES_LIST[roomNum % GAMES_LIST.length];
-
-      targetRoom = {
-        id: `BTC-${roomNum}`,
-        title: `${game.title} Challenge #${roomNum}`,
-        gameId: game.id,
-        hostId: 'usr_host',
-        hostName: 'CyberHost',
-        buyIn: 5,
-        maxPlayers: 2,
-        status: 'waiting',
-        createdAt: 'Just now',
-        spreadPercent: 5,
-        totalPot: 5,
-        platformFee: 0.25,
-        netPrizePool: 4.75,
-        distribution: 'winner_takes_all',
-        durationSeconds: game.id === 'snake' ? 60 : game.id === '2048' ? 90 : 45,
-        inviteCode: `BETCHA-${roomNum}`,
-        players: [
-          {
-            id: 'usr_host',
-            name: 'CyberHost',
-            avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=Host_${roomNum}`,
-            isHost: true,
-            isReady: true,
-            isCurrentUser: false,
-          }
-        ]
-      };
-
-      setRooms((prev) => [targetRoom!, ...prev]);
-      return;
-    }
-
-    // Auto-join the match room
-    joinMatch(targetRoom.id);
-
-    // Clean up query param so it doesn't trigger again
-    const newUrl = window.location.pathname;
-    window.history.replaceState({}, document.title, newUrl);
-  }, [isAuthenticated, rooms]);
-
-  useEffect(() => {
-    localStorage.setItem('betcha_user', JSON.stringify(user));
-  }, [user]);
-
-  useEffect(() => {
-    localStorage.setItem('betcha_rooms', JSON.stringify(rooms));
-  }, [rooms]);
-
-  useEffect(() => {
-    localStorage.setItem('betcha_tx', JSON.stringify(transactions));
-  }, [transactions]);
-
-  useEffect(() => {
-    localStorage.setItem('betcha_escrow', JSON.stringify(escrowLedger));
-  }, [escrowLedger]);
-
-  const setCurrentTab = (tab: NavigationTab) => {
-    soundFx.playClick();
-    setCurrentTabState(tab);
-  };
-
-  const showToast = (message: string, type: 'success' | 'info' | 'warning' | 'error' = 'info') => {
+  const showToast = useCallback((message: string, type: Toast['type'] = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
     setToast({ id, message, type });
-    setTimeout(() => {
-      setToast((prev) => (prev?.id === id ? null : prev));
-    }, 4000);
-  };
+    setTimeout(() => setToast((prev) => (prev?.id === id ? null : prev)), 4500);
+  }, []);
+
+  const fail = useCallback(
+    (err: unknown) => {
+      soundFx.playGameOver();
+      showToast(errorMessage(err), 'error');
+    },
+    [showToast]
+  );
+
+  // ---- Invite link: capture ?room=CODE before anything else, survive sign-in redirects
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('room');
+    if (!code) return;
+    safeStorage(() => localStorage.setItem(PENDING_INVITE_KEY, code), undefined);
+    setPendingInviteCode(code);
+    params.delete('room');
+    const rest = params.toString();
+    window.history.replaceState({}, document.title, window.location.pathname + (rest ? `?${rest}` : ''));
+  }, []);
+
+  // ---- Auth session
+  useEffect(() => {
+    if (!supabase) {
+      setAuthReady(true);
+      return;
+    }
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session);
+      if (!data.session) setAuthReady(true);
+    });
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next);
+      if (!next) {
+        setUser(EMPTY_USER);
+        setRooms([]);
+        setTransactions([]);
+        setAuthReady(true);
+      }
+    });
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  // ---- Data loading
+  const refresh = useCallback(async () => {
+    if (!supabase || !myId) return;
+
+    const [profileRes, mineRes, txRes, lbRes] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', myId).maybeSingle(),
+      supabase.from('match_players').select('match_id').eq('player_id', myId),
+      supabase.from('transactions').select('*').eq('user_id', myId).order('created_at', { ascending: false }).limit(50),
+      supabase.from('leaderboard').select('*').order('payout', { ascending: false }).limit(10),
+    ]);
+
+    if (profileRes.data) {
+      setUser(mapProfile(profileRes.data, isGuest));
+      setLastCreditClaim(profileRes.data.last_credit_claim ?? null);
+    }
+
+    const myMatchIds = (mineRes.data ?? []).map((r) => r.match_id);
+    const filter = myMatchIds.length
+      ? `status.eq.waiting,id.in.(${myMatchIds.map((id) => `"${id}"`).join(',')})`
+      : 'status.eq.waiting';
+    const { data: matchRows } = await supabase
+      .from('matches')
+      .select('*')
+      .or(filter)
+      .order('created_at', { ascending: false })
+      .limit(60);
+
+    const ids = (matchRows ?? []).map((m) => m.id);
+    const { data: playerRows } = ids.length
+      ? await supabase.from('match_players').select('*').in('match_id', ids)
+      : { data: [] as any[] };
+
+    setRooms(
+      (matchRows ?? [])
+        .map((m) => mapRoom(m, playerRows ?? [], myId))
+        // Hide other people's cancelled lobbies; keep my own history.
+        .filter((r) => r.status !== 'cancelled' || r.players.some((p) => p.isCurrentUser))
+    );
+
+    setTransactions(
+      (txRes.data ?? []).map((t) => ({
+        id: t.id,
+        timestamp: formatTime(t.created_at),
+        type: t.type,
+        amount: Number(t.amount),
+        matchId: t.match_id ?? undefined,
+        description: t.description,
+        status: t.status,
+      }))
+    );
+
+    setLeaderboard(
+      (lbRes.data ?? []).map((row, idx) => ({
+        id: `${row.match_id}_${row.player_id}`,
+        rank: idx + 1,
+        handle: row.handle,
+        avatar: row.avatar_url,
+        gameTitle: GAMES_LIST.find((g) => g.id === row.game_id)?.title ?? 'Arcade',
+        highScore: row.score ?? 0,
+        payoutWon: Number(row.payout ?? 0),
+      }))
+    );
+  }, [myId, isGuest]);
+
+  // Debounced refresh so a burst of realtime events triggers a single reload.
+  const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = useCallback(() => {
+    if (refreshTimer.current) clearTimeout(refreshTimer.current);
+    refreshTimer.current = setTimeout(() => {
+      refresh().catch((e) => console.warn('refresh failed', e));
+    }, 150);
+  }, [refresh]);
+
+  // ---- On sign-in: make sure a profile exists, then load everything
+  useEffect(() => {
+    if (!supabase || !session) return;
+    let cancelled = false;
+    (async () => {
+      const { error } = await supabase.rpc('ensure_profile');
+      if (cancelled) return;
+      if (error) {
+        console.error(error);
+        showToast(
+          error.message.includes('ensure_profile')
+            ? 'The Betcha database is not set up yet. Run supabase/migrations/001_multiplayer.sql in your Supabase project.'
+            : error.message,
+          'error'
+        );
+      }
+      await refresh();
+      if (!cancelled) setAuthReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- Realtime: reload whenever lobbies, players, my profile or my transactions change
+  useEffect(() => {
+    if (!supabase || !myId) return;
+    const channel = supabase
+      .channel(`betcha-live-${myId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'match_players' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${myId}` }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'transactions', filter: `user_id=eq.${myId}` }, scheduleRefresh)
+      .subscribe();
+
+    // Safety net in case a realtime event is missed (tab asleep, flaky network).
+    const poll = setInterval(scheduleRefresh, 15000);
+    const onFocus = () => scheduleRefresh();
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      clearInterval(poll);
+      window.removeEventListener('focus', onFocus);
+      supabase?.removeChannel(channel);
+    };
+  }, [myId, scheduleRefresh]);
+
+  // ---- Navigation & sound
+  const setCurrentTab = useCallback((tab: NavigationTab) => {
+    soundFx.playClick();
+    setCurrentTabState(tab);
+  }, []);
 
   const toggleSound = () => {
     const next = !soundEnabled;
@@ -215,18 +399,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (next) soundFx.playClick();
   };
 
-  // Practice & Arena Handlers
   const startPractice = (gameId: GameId) => {
     soundFx.playClick();
     setPracticeGameId(gameId);
     setActivePlayingMatch(null);
   };
 
-  const enterMatchArena = (match: MatchRoom) => {
+  const enterMatchArena = useCallback((match: MatchRoom) => {
     soundFx.playClick();
     setActivePlayingMatch(match);
     setPracticeGameId(null);
-  };
+  }, []);
 
   const exitArena = () => {
     soundFx.playClick();
@@ -234,542 +417,202 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setPracticeGameId(null);
   };
 
-  // Create Match
-  const createMatch = (config: {
-    gameId: GameId;
-    title: string;
-    buyIn: number;
-    maxPlayers: number;
-    distribution: 'winner_takes_all' | 'top_two';
-  }): MatchRoom | null => {
-    if (user.balance < config.buyIn) {
-      showToast(`Insufficient funds ($${user.balance.toFixed(2)}) for $${config.buyIn} buy-in. Deposit funds first!`, 'error');
+  const openLobby = useCallback(
+    (roomId: string) => {
+      setSelectedRoomId(roomId);
+      setCurrentTabState('lobbies');
+    },
+    []
+  );
+
+  // ---- Match actions (all validated server-side)
+  const createMatch: AppContextType['createMatch'] = async (config) => {
+    if (!supabase) return null;
+    const { data, error } = await supabase.rpc('create_match', {
+      p_game_id: config.gameId,
+      p_title: config.title,
+      p_buy_in: config.buyIn,
+      p_max_players: config.maxPlayers,
+      p_distribution: config.distribution,
+    });
+    if (error) {
+      fail(error);
       return null;
     }
-
-    const game = GAMES_LIST.find((g) => g.id === config.gameId);
-    const roomNum = Math.floor(1000 + Math.random() * 9000);
-    const roomId = `BTC-${roomNum}`;
-    const inviteCode = `BETCHA-${roomNum}`;
-
-    const totalPot = config.buyIn * 1; // initial host buy in
-    const platformFee = config.buyIn * 0.05;
-    const netPrizePool = totalPot - platformFee;
-
-    const newRoom: MatchRoom = {
-      id: roomId,
-      title: config.title || `${game?.title || 'Arcade'} Challenge #${roomNum}`,
-      gameId: config.gameId,
-      hostId: user.id,
-      hostName: user.displayName,
-      buyIn: config.buyIn,
-      maxPlayers: config.maxPlayers,
-      status: 'waiting',
-      createdAt: 'Just now',
-      spreadPercent: 5,
-      totalPot: config.buyIn, // current pot with 1 player
-      platformFee: config.buyIn * 0.05,
-      netPrizePool: config.buyIn * 0.95,
-      distribution: config.distribution,
-      durationSeconds: config.gameId === 'snake' ? 60 : config.gameId === '2048' ? 90 : 45,
-      inviteCode,
-      players: [
-        {
-          id: user.id,
-          name: user.displayName,
-          avatar: user.avatar,
-          isHost: true,
-          isReady: true,
-          isCurrentUser: true,
-        },
-      ],
-    };
-
-    // Deduct buy-in and place into escrow
-    setUser((prev) => ({
-      ...prev,
-      balance: prev.balance - config.buyIn,
-      escrowLocked: prev.escrowLocked + config.buyIn,
-    }));
-
-    const newTx: WalletTransaction = {
-      id: `tx_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'buy_in',
-      amount: -config.buyIn,
-      matchId: roomId,
-      description: `Escrow Lock: ${game?.title} (#${roomId})`,
-      status: 'escrowed',
-    };
-
-    const newEscrow: EscrowEntry = {
-      id: `esc_${roomNum}`,
-      matchId: roomId,
-      gameTitle: game?.title || 'Arcade',
-      totalLocked: config.buyIn,
-      platformFeeHeld: config.buyIn * 0.05,
-      playerCount: 1,
-      createdAt: 'Just now',
-      status: 'active_escrow',
-    };
-
-    setRooms((prev) => [newRoom, ...prev]);
-    setTransactions((prev) => [newTx, ...prev]);
-    setEscrowLedger((prev) => [newEscrow, ...prev]);
-
     soundFx.playCashChing();
-    showToast(`Created Lobby #${roomId}! $${config.buyIn.toFixed(2)} buy-in locked in Escrow.`, 'success');
-    setSelectedRoomId(roomId);
-    setCurrentTab('lobbies');
-
-    return newRoom;
+    showToast(`Lobby #${data.id} created. Copy the invite link and send it to your friends!`, 'success');
+    await refresh();
+    openLobby(data.id);
+    return mapRoom(data, [], myId);
   };
 
-  // Join Match
-  const joinMatch = (roomId: string): boolean => {
-    const room = rooms.find((r) => r.id === roomId);
-    if (!room) {
-      showToast('Match room not found', 'error');
+  const joinMatch = async (roomIdOrCode: string): Promise<boolean> => {
+    if (!supabase) return false;
+    const alreadyIn = rooms.find(
+      (r) => (r.id === roomIdOrCode || r.inviteCode === roomIdOrCode) && r.players.some((p) => p.isCurrentUser)
+    );
+    const { data, error } = await supabase.rpc('join_match', { p_code: roomIdOrCode });
+    if (error) {
+      fail(error);
       return false;
     }
-
-    if (room.players.some((p) => p.id === user.id)) {
-      showToast('You are already in this match lobby', 'info');
-      setSelectedRoomId(roomId);
-      setCurrentTab('lobbies');
-      return true;
-    }
-
-    if (room.players.length >= room.maxPlayers) {
-      showToast('Lobby is already full!', 'warning');
-      return false;
-    }
-
-    if (user.balance < room.buyIn) {
-      showToast(`Insufficient funds ($${user.balance.toFixed(2)}) for $${room.buyIn} buy-in.`, 'error');
-      return false;
-    }
-
-    // Deduct user funds
-    setUser((prev) => ({
-      ...prev,
-      balance: prev.balance - room.buyIn,
-      escrowLocked: prev.escrowLocked + room.buyIn,
-    }));
-
-    // Update room pot calculation
-    const updatedPlayers = [
-      ...room.players,
-      {
-        id: user.id,
-        name: user.displayName,
-        avatar: user.avatar,
-        isHost: false,
-        isReady: true,
-        isCurrentUser: true,
-      },
-    ];
-
-    const newTotalPot = room.buyIn * updatedPlayers.length;
-    const newPlatformFee = newTotalPot * 0.05;
-    const newNetPrize = newTotalPot - newPlatformFee;
-
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === roomId
-          ? {
-              ...r,
-              players: updatedPlayers,
-              totalPot: newTotalPot,
-              platformFee: newPlatformFee,
-              netPrizePool: newNetPrize,
-            }
-          : r
-      )
-    );
-
-    // Add TX & Escrow update
-    const newTx: WalletTransaction = {
-      id: `tx_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'buy_in',
-      amount: -room.buyIn,
-      matchId: roomId,
-      description: `Buy-In Joined: #${roomId}`,
-      status: 'escrowed',
-    };
-
-    setTransactions((prev) => [newTx, ...prev]);
-
-    setEscrowLedger((prev) =>
-      prev.map((e) =>
-        e.matchId === roomId
-          ? {
-              ...e,
-              totalLocked: e.totalLocked + room.buyIn,
-              platformFeeHeld: (e.totalLocked + room.buyIn) * 0.05,
-              playerCount: e.playerCount + 1,
-            }
-          : e
-      )
-    );
-
-    soundFx.playCashChing();
-    showToast(`Joined Match #${roomId}! $${room.buyIn.toFixed(2)} buy-in locked in Escrow.`, 'success');
-    setSelectedRoomId(roomId);
-    setCurrentTab('lobbies');
-    return true;
-  };
-
-  const togglePlayerReady = (roomId: string) => {
-    soundFx.playClick();
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== roomId) return r;
-        const players = r.players.map((p) =>
-          p.id === user.id ? { ...p, isReady: !p.isReady } : p
-        );
-        return { ...r, players };
-      })
-    );
-  };
-
-  const startMatchLobby = (roomId: string) => {
-    const room = rooms.find((r) => r.id === roomId);
-    if (!room) return;
-
-    if (room.players.length < 2) {
-      showToast('Cannot start match until both players have joined!', 'warning');
-      return;
-    }
-
-    soundFx.playClick();
-    setRooms((prev) =>
-      prev.map((r) => (r.id === roomId ? { ...r, status: 'in_progress' } : r))
-    );
-
-    enterMatchArena(room);
-    showToast(`Match Started! High score wins $${room.netPrizePool.toFixed(2)} pot!`, 'success');
-  };
-
-  // Submit Match Score
-  const submitMatchScore = (roomId: string, score: number) => {
-    soundFx.playPickup();
-
-    setRooms((prev) =>
-      prev.map((r) => {
-        if (r.id !== roomId) return r;
-        const players = r.players.map((p) =>
-          p.id === user.id ? { ...p, score } : p
-        );
-        return { ...r, players };
-      })
-    );
-
-    showToast(`Score of ${score.toLocaleString()} points submitted!`, 'info');
-  };
-
-  // Settle Escrow Payout for Match
-  const simulateFriendRuns = (roomId: string) => {
-    const room = rooms.find((r) => r.id === roomId);
-    if (!room) return;
-
-    soundFx.playClick();
-
-    // Work strictly with actual joined players
-    let currentPlayers = [...room.players];
-    if (currentPlayers.length === 0) {
-      showToast('No participants in room to settle', 'warning');
-      return;
-    }
-
-    const totalPot = room.buyIn * currentPlayers.length;
-    const platformFee = totalPot * 0.05;
-    const netPrizePool = totalPot - platformFee;
-
-    const userPlayer = currentPlayers.find((p) => p.id === user.id);
-    const userScore = userPlayer?.score || 0;
-
-    const scoredPlayers = currentPlayers.map((p) => {
-      const finalScore = p.score !== undefined ? p.score : (p.id === user.id ? userScore : 0);
-      return { ...p, score: finalScore, isReady: true };
-    });
-
-    // Rank players high to low score
-    scoredPlayers.sort((a, b) => (b.score || 0) - (a.score || 0));
-
-    // Determine payouts
-    let winnerId = scoredPlayers[0].id;
-    let winnerName = scoredPlayers[0].name;
-
-    const rankedPlayers = scoredPlayers.map((p, idx) => {
-      const rank = idx + 1;
-      let payout = 0;
-      if (room.distribution === 'winner_takes_all') {
-        if (rank === 1) payout = netPrizePool;
-      } else {
-        // top two 70% / 30%
-        if (rank === 1) payout = netPrizePool * 0.7;
-        if (rank === 2) payout = netPrizePool * 0.3;
-      }
-      return { ...p, rank, payout };
-    });
-
-    // Check if current user won or placed
-    const currentUserResult = rankedPlayers.find((p) => p.id === user.id);
-    const userPayout = currentUserResult?.payout || 0;
-    const isUserWinner = currentUserResult?.rank === 1;
-
-    // 4. Update state: Room Completed, User Wallet, Transactions, Escrow Ledger, User Stats
-    setRooms((prev) =>
-      prev.map((r) =>
-        r.id === roomId
-          ? {
-              ...r,
-              status: 'completed',
-              players: rankedPlayers,
-              totalPot,
-              platformFee,
-              netPrizePool,
-              winnerId,
-              winnerName,
-            }
-          : r
-      )
-    );
-
-    // Update User Wallet & Stats
-    setUser((prev) => {
-      const newMatchesPlayed = prev.matchesPlayed + 1;
-      const newWinsCount = isUserWinner ? prev.winsCount + 1 : prev.winsCount;
-      const newWinRate = Number(((newWinsCount / newMatchesPlayed) * 100).toFixed(1));
-      const newBalance = prev.balance + userPayout;
-      const newEscrow = Math.max(0, prev.escrowLocked - room.buyIn);
-
-      return {
-        ...prev,
-        balance: newBalance,
-        escrowLocked: newEscrow,
-        totalEarnings: prev.totalEarnings + userPayout,
-        matchesPlayed: newMatchesPlayed,
-        winsCount: newWinsCount,
-        winRate: newWinRate,
-      };
-    });
-
-    // Update Escrow status
-    setEscrowLedger((prev) =>
-      prev.map((e) =>
-        e.matchId === roomId ? { ...e, status: 'settled' } : e
-      )
-    );
-
-    // Add Payout Transaction if user earned money
-    const newTxList: WalletTransaction[] = [];
-    if (userPayout > 0) {
-      newTxList.push({
-        id: `tx_${Date.now()}_win`,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        type: 'payout_win',
-        amount: userPayout,
-        matchId: roomId,
-        description: `Tournament Prize Payout (#${roomId})`,
-        status: 'completed',
-      });
-    }
-
-    newTxList.push({
-      id: `tx_${Date.now()}_fee`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'platform_fee',
-      amount: -platformFee,
-      matchId: roomId,
-      description: `5% Platform Spread Collected (#${roomId})`,
-      status: 'completed',
-    });
-
-    setTransactions((prev) => [...newTxList, ...prev]);
-
-    // Leaderboard update
-    if (isUserWinner && userPlayer) {
-      const gameTitle = GAMES_LIST.find((g) => g.id === room.gameId)?.title || 'Arcade';
-      setLeaderboard((prev) => [
-        {
-          id: `lb_${Date.now()}`,
-          rank: 1,
-          handle: user.handle,
-          avatar: user.avatar,
-          gameTitle,
-          highScore: userScore,
-          payoutWon: userPayout,
-        },
-        ...prev.map((l) => ({ ...l, rank: l.rank + 1 })),
-      ]);
-    }
-
-    // Sound & Confetti
-    if (isUserWinner) {
-      soundFx.playWinFanfare();
+    if (!alreadyIn) {
       soundFx.playCashChing();
-      confetti({
-        particleCount: 100,
-        spread: 70,
-        origin: { y: 0.6 },
-        colors: ['#10b981', '#6366f1', '#f59e0b', '#ec4899'],
-      });
-      showToast(`VICTORY! You won 1st Place & $${userPayout.toFixed(2)} net payout!`, 'success');
-    } else {
-      soundFx.playGameOver();
-      showToast(`Match Completed! Winner: ${winnerName} ($${netPrizePool.toFixed(2)} Pot)`, 'info');
+      showToast(`Joined ${data.title}! Hit "Ready" so the host can start.`, 'success');
     }
-  };
-
-  // Deposit & Withdraw
-  const depositFunds = (amount: number) => {
-    setUser((prev) => ({ ...prev, balance: prev.balance + amount }));
-    const newTx: WalletTransaction = {
-      id: `tx_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'deposit',
-      amount: amount,
-      description: 'Instant Card Deposit (Mock Visa **** 4892)',
-      status: 'completed',
-    };
-    setTransactions((prev) => [newTx, ...prev]);
-    soundFx.playCashChing();
-    showToast(`Successfully deposited $${amount.toFixed(2)} to Wallet!`, 'success');
-  };
-
-  const withdrawFunds = (amount: number): boolean => {
-    if (user.balance < amount) {
-      showToast(`Insufficient balance ($${user.balance.toFixed(2)}) for withdrawal`, 'error');
-      return false;
-    }
-
-    setUser((prev) => ({ ...prev, balance: prev.balance - amount }));
-    const newTx: WalletTransaction = {
-      id: `tx_${Date.now()}`,
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      type: 'withdrawal',
-      amount: -amount,
-      description: 'Payout Transfer to Bank Account (**** 9102)',
-      status: 'completed',
-    };
-    setTransactions((prev) => [newTx, ...prev]);
-    soundFx.playCashChing();
-    showToast(`Withdrawal of $${amount.toFixed(2)} initiated!`, 'success');
+    await refresh();
+    openLobby(data.id);
     return true;
   };
 
-  // Switch User Account
-  const switchUserAccount = (handle: string) => {
-    soundFx.playClick();
-    if (handle === INITIAL_USER.handle) {
-      setUser(INITIAL_USER);
-      showToast(`Switched account to ${INITIAL_USER.displayName}`, 'info');
-    }
-  };
-
-  // Supabase auth state listener when Supabase is configured
-  useEffect(() => {
+  const leaveMatch = async (roomId: string) => {
     if (!supabase) return;
-
-    const { data: authListener } = supabase.auth.onAuthStateChange(async (_event, session) => {
-      if (session?.user) {
-        setIsAuthenticated(true);
-        const authUser = session.user;
-        const meta = authUser.user_metadata || {};
-        const fullName = meta.full_name || meta.name || authUser.email?.split('@')[0] || 'Contender';
-        const avatarUrl = meta.avatar_url || meta.picture || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(authUser.id)}`;
-
-        // Sync to Supabase profiles database table
-        const profile = await syncUserProfileToSupabase({
-          id: authUser.id,
-          email: authUser.email,
-          full_name: fullName,
-          avatar_url: avatarUrl,
-        });
-
-        const displayName = profile?.display_name || fullName;
-        const handle = profile?.handle || ('@' + displayName.toLowerCase().replace(/[^a-z0-9_]/g, '') + '_' + authUser.id.slice(0, 4));
-        const finalAvatar = profile?.avatar_url || avatarUrl;
-
-        setUser((prev) => ({
-          ...prev,
-          id: authUser.id,
-          handle,
-          displayName,
-          avatar: finalAvatar,
-          badges: [
-            { id: 'b1', title: 'Verified Member', description: `Authenticated as ${authUser.email}`, icon: 'ShieldCheck', unlocked: true },
-          ],
-        }));
-      }
-    });
-
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
-
-  const loginWithEmail = (email: string, displayName?: string) => {
-    soundFx.playCashChing();
-    setIsAuthenticated(true);
-    const prefix = email.split('@')[0] || 'Player';
-    const cleanName = displayName || (prefix.charAt(0).toUpperCase() + prefix.slice(1));
-    const timeId = Math.floor(1000 + Math.random() * 9000).toString();
-
-    setUser({
-      id: `usr_${prefix}_${Date.now()}`,
-      handle: `@${prefix.toLowerCase()}_${timeId}`,
-      displayName: cleanName,
-      avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(prefix)}`,
-      balance: 25.00,
-      escrowLocked: 0.00,
-      totalEarnings: 0.00,
-      matchesPlayed: 0,
-      winsCount: 0,
-      winRate: 0,
-      favoriteGame: 'Cyber Snake',
-      vipTier: 'Contender',
-      badges: [
-        { id: 'b1', title: 'Verified Email', description: `Authenticated as ${email}`, icon: 'ShieldCheck', unlocked: true },
-      ],
-    });
-    setTransactions([
-      {
-        id: `tx_${Date.now()}`,
-        timestamp: 'Just now',
-        type: 'deposit',
-        amount: 25.00,
-        description: `Welcome Bonus Deposit (${email})`,
-        status: 'completed',
-      },
-    ]);
-    showToast(`Welcome ${cleanName}! $25.00 Welcome balance loaded.`, 'success');
+    const room = rooms.find((r) => r.id === roomId);
+    const { error } = await supabase.rpc('leave_match', { p_match_id: roomId });
+    if (error) return fail(error);
+    showToast(room?.hostId === myId ? 'Lobby cancelled. Everyone was refunded.' : 'You left the lobby. Buy-in refunded.', 'info');
+    setSelectedRoomId(null);
+    await refresh();
   };
 
-  const loginWithOAuth = (provider: 'google' | 'guest') => {
-    if (provider === 'google') {
-      loginWithEmail('google.player@betcha.io', 'Google Player');
-    } else {
-      loginWithEmail('arcade.pass@betcha.io', 'Arcade Contender');
-    }
-  };
-
-  const logout = () => {
+  const togglePlayerReady = async (roomId: string) => {
+    if (!supabase) return;
     soundFx.playClick();
-    setIsAuthenticated(false);
-    showToast('Signed out of Betcha Cyber Arcade.', 'info');
+    const me = rooms.find((r) => r.id === roomId)?.players.find((p) => p.isCurrentUser);
+    const { error } = await supabase.rpc('set_ready', { p_match_id: roomId, p_ready: !me?.isReady });
+    if (error) return fail(error);
+    await refresh();
   };
+
+  const startMatchLobby = async (roomId: string) => {
+    if (!supabase) return;
+    const { error } = await supabase.rpc('start_match', { p_match_id: roomId });
+    if (error) return fail(error);
+    soundFx.playClick();
+    await refresh();
+    // Everyone (host included) is moved into the arena by the auto-enter effect below.
+  };
+
+  const submitMatchScore = async (roomId: string, score: number) => {
+    if (!supabase) return;
+    const { data, error } = await supabase.rpc('submit_score', { p_match_id: roomId, p_score: Math.max(0, Math.floor(score)) });
+    if (error) return fail(error);
+    soundFx.playPickup();
+    showToast(
+      data.status === 'completed'
+        ? `Score of ${score.toLocaleString()} submitted. Match settled!`
+        : `Score of ${score.toLocaleString()} submitted. Waiting for the others to finish...`,
+      'info'
+    );
+    await refresh();
+  };
+
+  const settleMatch = async (roomId: string) => {
+    if (!supabase) return;
+    const { error } = await supabase.rpc('settle_match', { p_match_id: roomId });
+    if (error) return fail(error);
+    await refresh();
+  };
+
+  // ---- Credits
+  const canClaimCreditsAt = useMemo(() => {
+    if (!lastCreditClaim) return null;
+    const next = new Date(new Date(lastCreditClaim).getTime() + 20 * 3600 * 1000);
+    return next.getTime() > Date.now() ? next : null;
+  }, [lastCreditClaim]);
+
+  const claimFreeCredits = async (): Promise<boolean> => {
+    if (!supabase) return false;
+    const { error } = await supabase.rpc('claim_credits');
+    if (error) {
+      fail(error);
+      return false;
+    }
+    soundFx.playCashChing();
+    showToast('25 free credits added to your wallet!', 'success');
+    await refresh();
+    return true;
+  };
+
+  const logout = async () => {
+    soundFx.playClick();
+    setActivePlayingMatch(null);
+    setPracticeGameId(null);
+    setSelectedRoomId(null);
+    await supabase?.auth.signOut();
+    showToast('Signed out.', 'info');
+  };
+
+  // ---- Join the pending invite once signed in
+  useEffect(() => {
+    if (!isAuthenticated || !authReady || !pendingInviteCode) return;
+    const code = pendingInviteCode;
+    safeStorage(() => localStorage.removeItem(PENDING_INVITE_KEY), undefined);
+    setPendingInviteCode(null);
+    joinMatch(code);
+  }, [isAuthenticated, authReady, pendingInviteCode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- React to match status changes: pull me into the arena when a match starts,
+  //      celebrate when one I'm in gets settled.
+  const autoEntered = useRef<Set<string>>(new Set());
+  const prevStatus = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    for (const room of rooms) {
+      const before = prevStatus.current.get(room.id);
+      prevStatus.current.set(room.id, room.status);
+      const me = room.players.find((p) => p.isCurrentUser);
+      if (!me) continue;
+
+      if (room.status === 'in_progress' && me.score === undefined) {
+        const justStarted = before === 'waiting';
+        if ((justStarted || selectedRoomId === room.id) && !autoEntered.current.has(room.id) && !activePlayingMatch) {
+          autoEntered.current.add(room.id);
+          setSelectedRoomId(null);
+          showToast(`${room.title} has started. Go!`, 'success');
+          enterMatchArena(room);
+        }
+      }
+
+      // Only celebrate transitions we witnessed, not matches that were already settled on load.
+      if (room.status === 'completed' && before !== undefined && before !== 'completed') {
+        if (me.rank === 1) {
+          soundFx.playWinFanfare();
+          confetti({ particleCount: 100, spread: 70, origin: { y: 0.6 }, colors: ['#10b981', '#6366f1', '#f59e0b', '#ec4899'] });
+          showToast(`You won ${room.title}! +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
+        } else if ((me.payout ?? 0) > 0) {
+          showToast(`2nd place in ${room.title}: +${(me.payout ?? 0).toFixed(2)} credits`, 'success');
+        } else {
+          showToast(`${room.title} is over. ${room.winnerName} won.`, 'info');
+        }
+      }
+    }
+  }, [rooms, selectedRoomId, activePlayingMatch, enterMatchArena, showToast]);
+
+  const escrowLedger: EscrowEntry[] = useMemo(
+    () =>
+      rooms
+        .filter((r) => r.players.some((p) => p.isCurrentUser))
+        .map((r) => ({
+          id: `esc_${r.id}`,
+          matchId: r.id,
+          gameTitle: GAMES_LIST.find((g) => g.id === r.gameId)?.title ?? 'Arcade',
+          totalLocked: r.totalPot,
+          platformFeeHeld: r.platformFee,
+          playerCount: r.players.length,
+          createdAt: r.createdAt,
+          status: r.status === 'completed' ? 'settled' : r.status === 'cancelled' ? 'refunded' : 'active_escrow',
+        })),
+    [rooms]
+  );
 
   return (
     <AppContext.Provider
       value={{
+        authReady,
         isAuthenticated,
-        loginWithEmail,
-        loginWithOAuth,
+        isGuest,
         logout,
+        pendingInviteCode,
         currentTab,
         setCurrentTab,
         user,
@@ -786,15 +629,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         exitArena,
         createMatch,
         joinMatch,
+        leaveMatch,
         togglePlayerReady,
         startMatchLobby,
         submitMatchScore,
-        simulateFriendRuns,
-        depositFunds,
-        withdrawFunds,
+        settleMatch,
+        claimFreeCredits,
+        canClaimCreditsAt,
         soundEnabled,
         toggleSound,
-        switchUserAccount,
         selectedRoomId,
         setSelectedRoomId,
       }}
@@ -806,8 +649,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
 export const useApp = () => {
   const context = useContext(AppContext);
-  if (!context) {
-    throw new Error('useApp must be used within an AppProvider');
-  }
+  if (!context) throw new Error('useApp must be used within an AppProvider');
   return context;
 };

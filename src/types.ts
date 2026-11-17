@@ -41,6 +41,7 @@ export interface MatchRoom {
   players: MatchPlayer[];
   status: MatchStatus;
   createdAt: string;
+  startedAt?: string; // ISO timestamp when the host started the match
   spreadPercent: number; // 5%
   totalPot: number; // buyIn * players.length
   platformFee: number; // totalPot * 0.05

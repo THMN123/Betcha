@@ -6,6 +6,7 @@ import { GameId } from '../../types';
 
 import MorphingHeading from '../common/MorphingHeading';
 import { HomeSkeleton } from '../common/SkeletonLoader';
+import { cr } from '../../utils/credits';
 
 const HomeView: React.FC = () => {
   const {
@@ -34,14 +35,14 @@ const HomeView: React.FC = () => {
   const waitingRooms = rooms.filter((r) => r.status === 'waiting');
 
   const handleQuickMatchOfDay = () => {
-    // Quick create or join $5 Cyber Snake match
+    // Quick create or join a 5 credit Cyber Snake match
     const existing = waitingRooms.find((r) => r.gameId === 'snake' && r.buyIn === 5);
     if (existing) {
       joinMatch(existing.id);
     } else {
       createMatch({
         gameId: 'snake',
-        title: 'Quick Match of the Day ($5 Snake)',
+        title: 'Quick Match of the Day (5 cr Snake)',
         buyIn: 5,
         maxPlayers: 4,
         distribution: 'winner_takes_all',
@@ -65,11 +66,11 @@ const HomeView: React.FC = () => {
           </div>
 
           <MorphingHeading as="h1" glowColor="emerald" className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2">
-            $5 Cyber Snake Showdown
+            5 Credit Cyber Snake Showdown
           </MorphingHeading>
 
           <p className="text-xs sm:text-sm text-zinc-300 mb-5 leading-relaxed">
-            Fast 60-second speed runs. 4 players enter, high score takes the <span className="font-bold text-emerald-400">$19.00 net pot</span> after 5% platform spread!
+            Fast 60-second speed runs. 4 players enter, high score takes the <span className="font-bold text-emerald-400">19 cr pot</span> after the 5% fee!
           </p>
 
           <div className="flex flex-wrap items-center gap-3">
@@ -224,7 +225,7 @@ const HomeView: React.FC = () => {
                 >
                   <div className="flex items-center gap-3">
                     <div className="w-10 h-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center font-bold text-emerald-400 font-mono text-sm shrink-0">
-                      ${room.buyIn}
+                      {cr(room.buyIn)}
                     </div>
 
                     <div>
@@ -297,7 +298,7 @@ const HomeView: React.FC = () => {
 
                 <div className="text-right">
                   <span className="block font-mono font-bold text-emerald-400 text-xs">
-                    +${entry.payoutWon.toFixed(2)}
+                    +{cr(entry.payoutWon)}
                   </span>
                   <span className="text-[10px] text-zinc-500 font-mono">{entry.highScore.toLocaleString()} PTS</span>
                 </div>

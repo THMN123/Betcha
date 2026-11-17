@@ -17,12 +17,13 @@ import {
 } from 'lucide-react';
 import MorphingHeading from '../common/MorphingHeading';
 import { useAuth } from '../../hooks/useAuth';
+import { signInAsGuest, signInWithProvider } from '../../lib/supabase';
 import { useApp } from '../../context/AppContext';
 
 export const AuthLanding: React.FC = () => {
-  const { loginWithEmail, showToast } = useApp();
+  const { showToast, pendingInviteCode } = useApp();
   const { signInWithEmail, signUpWithEmail, isSupabaseConfigured } = useAuth();
-  const [step, setStep] = useState<'welcome' | 'auth'>('welcome');
+  const [step, setStep] = useState<'welcome' | 'auth'>(() => (pendingInviteCode ? 'auth' : 'welcome'));
   const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signup');
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -55,32 +56,17 @@ export const AuthLanding: React.FC = () => {
     try {
       if (isSupabaseConfigured) {
         if (authMode === 'signup') {
-          // 1. Create user account in Supabase
-          await signUpWithEmail(email, password, displayName);
-          
-          // 2. Instantly redirect to Sign In tab
-          setAuthMode('signin');
-
-          // 3. Set the prominent notification message requested by user
-          setSuccessInfo('Check your email inbox for the Supabase confirmation link.');
-
-          // 4. Attempt immediate sign in (if Supabase email confirmation is disabled, user logs in right away)
-          try {
-            await signInWithEmail(email, password);
-            showToast('Account created and signed in successfully!', 'success');
-          } catch (signInErr: any) {
-            const msg = signInErr?.message || '';
-            if (msg.toLowerCase().includes('email not confirmed')) {
-              setAuthError('Email not confirmed yet. Check your email inbox for the Supabase confirmation link.');
-              showToast('Check your email inbox for the Supabase confirmation link.', 'info');
-            } else {
-              showToast('Account created! Please sign in with your credentials.', 'success');
-            }
+          const { session } = await signUpWithEmail(email, password, displayName);
+          if (session) {
+            showToast('Account created. Welcome to Betcha!', 'success');
+          } else {
+            setAuthMode('signin');
+            setSuccessInfo(`Almost there: open the confirmation link we sent to ${email}, then sign in here.`);
           }
         } else {
           // Sign In
           await signInWithEmail(email, password);
-          showToast('Signed in successfully via Supabase!', 'success');
+          showToast('Signed in!', 'success');
         }
       } else {
         setAuthError('Supabase is not connected. Add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to environment variables to store users in Supabase.');
@@ -92,6 +78,34 @@ export const AuthLanding: React.FC = () => {
       } else {
         setAuthError(msg || 'Authentication failed. Please check your credentials.');
       }
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGoogle = async () => {
+    setAuthError(null);
+    setIsSubmitting(true);
+    try {
+      await signInWithProvider('google');
+    } catch (err: any) {
+      setAuthError(
+        /provider is not enabled/i.test(err?.message || '')
+          ? 'Google sign-in is not enabled yet. Turn on the Google provider in Supabase (Authentication > Sign In / Providers).'
+          : err?.message || 'Google sign-in failed'
+      );
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleGuest = async () => {
+    setAuthError(null);
+    setIsSubmitting(true);
+    try {
+      await signInAsGuest();
+      showToast('Playing as a guest. Your credits are tied to this browser.', 'info');
+    } catch (err: any) {
+      setAuthError(err?.message || 'Guest sign-in failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -219,7 +233,7 @@ export const AuthLanding: React.FC = () => {
                 className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-zinc-900/90 border border-emerald-500/30 text-xs font-mono text-emerald-400 shadow-xl backdrop-blur-md"
               >
                 <Sparkles className="w-4 h-4 text-amber-400 animate-pulse" />
-                <span>Play Games • Wager Skill • Win Cash</span>
+                <span>Play Games • Challenge Friends • Win the Pot</span>
               </motion.div>
 
               <div className="space-y-2">
@@ -228,12 +242,12 @@ export const AuthLanding: React.FC = () => {
                 </MorphingHeading>
 
                 <p className="text-xl sm:text-3xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-teal-300 to-indigo-400 tracking-tight leading-tight">
-                  Play Arcade Games. Wager Skill. Win Real Cash.
+                  Play Arcade Games. Beat Your Friends. Take the Pot.
                 </p>
               </div>
 
               <p className="text-xs sm:text-sm text-zinc-400 max-w-lg mx-auto leading-relaxed">
-                Experience 60-second speed runs in Cyber Snake, 2048 & Neon Dodge. Wagers are secured in automated 5% escrow vaults and paid instantly to highest scorers.
+                Experience 60-second speed runs in Cyber Snake, 2048 & Neon Dodge. Everyone buys in with play credits, plays the same game, and the highest score takes the pot automatically.
               </p>
 
               <motion.div
@@ -254,7 +268,7 @@ export const AuthLanding: React.FC = () => {
               <div className="flex flex-wrap items-center justify-center gap-2 pt-4 font-mono text-[11px] text-zinc-400">
                 <span className="px-3 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                  Instant Wallet Payouts
+                  Automatic Payouts
                 </span>
                 <span className="px-3 py-1 rounded-full bg-zinc-900/80 border border-zinc-800 flex items-center gap-1.5">
                   <CheckCircle2 className="w-3.5 h-3.5 text-teal-400" />
@@ -287,14 +301,24 @@ export const AuthLanding: React.FC = () => {
                   </div>
 
                   <h2 className="text-2xl font-black text-white font-display tracking-tight">
-                    {authMode === 'signup' ? 'Create Supabase Account' : 'Sign In to Betcha'}
+                    {authMode === 'signup' ? 'Create Your Account' : 'Sign In to Betcha'}
                   </h2>
                   <p className="text-xs text-zinc-400 mt-1">
                     {authMode === 'signup'
-                      ? 'Register your profile and wallet directly in Supabase database.'
-                      : 'Enter your credentials to log into your Supabase account.'}
+                      ? 'New players start with 25 free play credits.'
+                      : 'Welcome back. Your lobbies and credits are waiting.'}
                   </p>
                 </div>
+
+                {pendingInviteCode && (
+                  <div className="mb-5 p-3 rounded-xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-200 text-xs flex items-start gap-2">
+                    <Swords className="w-4 h-4 shrink-0 mt-0.5 text-indigo-400" />
+                    <span>
+                      You've been invited to match <strong className="font-mono text-white">{pendingInviteCode}</strong>.
+                      Sign in or create an account and you'll join it automatically.
+                    </span>
+                  </div>
+                )}
 
                 {/* Mode Switcher Tabs */}
                 <div className="flex bg-zinc-950 p-1 rounded-xl border border-zinc-800/80 mb-5">
@@ -427,9 +451,29 @@ export const AuthLanding: React.FC = () => {
                   </button>
                 </form>
 
-                <div className="mt-5 pt-4 border-t border-zinc-800/80 flex items-center justify-center gap-2 text-[11px] text-zinc-500 text-center font-mono">
-                  <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>Direct Supabase Auth & PostgreSQL Row Security</span>
+                <div className="my-4 flex items-center gap-3 text-[10px] font-mono uppercase text-zinc-500">
+                  <div className="h-px flex-1 bg-zinc-800" />
+                  <span>or</span>
+                  <div className="h-px flex-1 bg-zinc-800" />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGoogle}
+                    disabled={isSubmitting}
+                    className="py-2.5 rounded-xl bg-white hover:bg-zinc-200 text-zinc-900 font-bold text-xs transition-colors disabled:opacity-50"
+                  >
+                    Continue with Google
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleGuest}
+                    disabled={isSubmitting}
+                    className="py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs transition-colors disabled:opacity-50"
+                  >
+                    Play as Guest
+                  </button>
                 </div>
               </div>
             </motion.div>
@@ -443,7 +487,7 @@ export const AuthLanding: React.FC = () => {
         <div className="flex items-center gap-3">
           <span>5% Escrow Spread</span>
           <span>•</span>
-          <span>Instant Wallet Payouts</span>
+          <span>Play credits only, no real money</span>
         </div>
       </footer>
     </div>

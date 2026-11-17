@@ -2,6 +2,7 @@ import React from 'react';
 import { Gamepad2, Swords, Wallet, User } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { NavigationTab } from '../../types';
+import { cr } from '../../utils/credits';
 
 const BottomNavbar: React.FC = () => {
   const { currentTab, setCurrentTab, user, escrowLedger, activePlayingMatch, practiceGameId } = useApp();
@@ -27,7 +28,7 @@ const BottomNavbar: React.FC = () => {
       id: 'wallet',
       label: 'Wallet',
       icon: <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />,
-      badge: user.escrowLocked > 0 ? `$${user.escrowLocked.toFixed(0)}` : undefined,
+      badge: user.escrowLocked > 0 ? cr(Math.round(user.escrowLocked)) : undefined,
     },
     {
       id: 'profile',
