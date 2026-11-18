@@ -217,6 +217,11 @@ const ProfileView: React.FC = () => {
           <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
           <span>Sign Out / Return to Auth Screen</span>
         </button>
+        <p className="mt-3 text-center text-[11px] text-zinc-500">
+          <a href="/privacy.html" className="underline hover:text-zinc-300">Privacy Policy</a>
+          {' · '}
+          <a href="/terms.html" className="underline hover:text-zinc-300">Terms of Service</a>
+        </p>
       </div>
     </div>
   );

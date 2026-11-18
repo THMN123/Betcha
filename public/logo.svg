@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10b981"/>
+      <stop offset="0.55" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#9333ea"/>
+    </linearGradient>
+    <linearGradient id="letter" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#6ee7b7"/>
+      <stop offset="1" stop-color="#10b981"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.45" r="0.55">
+      <stop offset="0" stop-color="#10b981" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#10b981" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#frame)"/>
+  <rect x="26" y="26" width="460" height="460" rx="90" fill="#09090b"/>
+  <rect x="26" y="26" width="460" height="460" rx="90" fill="url(#glow)"/>
+  <!-- B -->
+  <path fill="url(#letter)" d="M156 112h126c62 0 100 30 100 80 0 30-15 53-41 64 34 10 55 37 55 73 0 55-42 91-110 91H156Zm68 58v62h50c22 0 35-11 35-31s-13-31-35-31Zm0 116v68h58c25 0 39-12 39-34s-14-34-39-34Z"/>
+  <!-- spark -->
+  <path fill="#fbbf24" d="M404 92l12 30 30 12-30 12-12 30-12-30-30-12 30-12z"/>
+</svg>

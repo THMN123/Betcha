@@ -497,9 +497,10 @@ export const AuthLanding: React.FC = () => {
       <footer className="relative z-10 w-full max-w-6xl mx-auto px-4 py-4 border-t border-zinc-900/80 flex items-center justify-between text-[11px] text-zinc-500 font-mono shrink-0">
         <div>© 2026 BETCHA Cyber Arcade</div>
         <div className="flex items-center gap-3">
-          <span>5% Escrow Spread</span>
-          <span>•</span>
           <span>Play credits only, no real money</span>
+          <span>•</span>
+          <a href="/privacy.html" className="underline hover:text-zinc-300">Privacy</a>
+          <a href="/terms.html" className="underline hover:text-zinc-300">Terms</a>
         </div>
       </footer>
     </div>
