@@ -1,19 +1,14 @@
 import React, { useEffect, useRef } from 'react';
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap } from 'lucide-react';
+import { Zap } from 'lucide-react';
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
 import { peerColor } from '../../hooks/useLiveMatch';
 import { maxTicksFor } from '../../../supabase/functions/_shared/games/index.ts';
 import { useGhosts } from '../../games/useGhosts';
 import { snakeSim, SnakeAction, SNAKE_GRID, type SnakeState, type Cell } from '../../../supabase/functions/_shared/games/snake.ts';
-import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
+import { GameHud, GameOverlays, DPad, Board, haptic, type GameProps, type Dir } from './GameShell';
 import { useCanvasLoop, glowDot, lerp } from './canvas';
 
-const theme: Theme = {
-  accent: 'text-emerald-400',
-  button: 'bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 shadow-lg shadow-emerald-500/25',
-  badge: 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
-};
 
 const SIZE = 320;
 const CELL = SIZE / SNAKE_GRID;
@@ -163,38 +158,43 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
     const dy = e.changedTouches[0].clientY - touchStart.current.y;
     touchStart.current = null;
     if (Math.max(Math.abs(dx), Math.abs(dy)) < 20) return;
+    haptic();
     if (Math.abs(dx) > Math.abs(dy)) turn(dx > 0 ? SnakeAction.RIGHT : SnakeAction.LEFT);
     else turn(dy > 0 ? SnakeAction.DOWN : SnakeAction.UP);
   };
 
   const multiplier = stateRef.current?.multiplier ?? 1;
-  const pad = 'w-12 h-10 rounded-xl bg-zinc-900 border border-zinc-800 active:bg-emerald-500 active:text-zinc-950 flex items-center justify-center text-zinc-300 shadow-md disabled:opacity-30';
+  const DIRS: Record<Dir, number> = { up: SnakeAction.UP, down: SnakeAction.DOWN, left: SnakeAction.LEFT, right: SnakeAction.RIGHT };
 
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-sm mx-auto p-2 sm:p-3">
+    <div className="flex flex-col items-center w-full max-w-sm mx-auto">
       <GameHud
         hud={hud}
+        gameId="snake"
         label="Score"
-        theme={theme}
+        timeLimitSeconds={timeLimitSeconds}
         extra={
-          <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-xl text-amber-400 text-xs font-bold">
-            <Zap className="w-3.5 h-3.5" />
-            <span>{multiplier}x</span>
+          <div
+            className={`mb-0.5 flex items-center gap-1 px-2.5 py-1 rounded-full text-sm font-extrabold transition-colors ${
+              multiplier > 1 ? 'bg-amber-300 text-zinc-950' : 'bg-white/[0.07] text-zinc-400'
+            }`}
+          >
+            <Zap className="w-3.5 h-3.5" /> {multiplier}x
           </div>
         }
       />
-      <div
+      <Board
+        gameId="snake"
+        className="aspect-square bg-zinc-950"
         onTouchStart={(e) => (touchStart.current = { x: e.touches[0].clientX, y: e.touches[0].clientY })}
         onTouchEnd={onTouchEnd}
-        className="relative w-full aspect-square bg-zinc-950 border-2 border-zinc-800 rounded-2xl overflow-hidden shadow-2xl touch-none select-none"
       >
         <canvas ref={canvasRef} className="w-full h-full touch-none block" />
         <GameOverlays
           hud={hud}
-          title="Cyber Snake"
-          howTo="Swipe or use the arrows to eat orbs. Gold orbs raise your multiplier."
-          icon={<Zap className="w-7 h-7" />}
-          theme={theme}
+          gameId="snake"
+          howTo="Eat orbs to score. Gold orbs raise your multiplier. Don't hit the walls or yourself."
+          controls={['Swipe the board', 'Arrow pad', 'Arrow keys / WASD']}
           isPractice={isPractice}
           timeLimitSeconds={timeLimitSeconds}
           getSeed={getSeed}
@@ -203,14 +203,9 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
           resumeFrom={resumeFrom}
           resume={resume}
         />
-      </div>
-      <div className="w-full mt-3 flex flex-col items-center gap-1">
-        <button type="button" className={pad} disabled={!hud.running} onClick={() => turn(SnakeAction.UP)}><ArrowUp className="w-5 h-5" /></button>
-        <div className="flex items-center gap-1.5">
-          <button type="button" className={pad} disabled={!hud.running} onClick={() => turn(SnakeAction.LEFT)}><ArrowLeft className="w-5 h-5" /></button>
-          <button type="button" className={pad} disabled={!hud.running} onClick={() => turn(SnakeAction.DOWN)}><ArrowDown className="w-5 h-5" /></button>
-          <button type="button" className={pad} disabled={!hud.running} onClick={() => turn(SnakeAction.RIGHT)}><ArrowRight className="w-5 h-5" /></button>
-        </div>
+      </Board>
+      <div className="mt-5">
+        <DPad disabled={!hud.running} onDir={(d) => turn(DIRS[d])} />
       </div>
     </div>
   );

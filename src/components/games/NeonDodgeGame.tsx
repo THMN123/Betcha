@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Zap } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Circle } from 'lucide-react';
 import { soundFx } from '../../utils/audio';
 import { useGameRun } from '../../hooks/useGameRun';
 import { peerColor } from '../../hooks/useLiveMatch';
@@ -16,14 +16,9 @@ import {
 } from '../../../supabase/functions/_shared/games/neondodge.ts';
 import { maxTicksFor } from '../../../supabase/functions/_shared/games/index.ts';
 import { useGhosts } from '../../games/useGhosts';
-import { GameHud, GameOverlays, type GameProps, type Theme } from './GameShell';
+import { GameHud, GameOverlays, Board, haptic, type GameProps } from './GameShell';
 import { useCanvasLoop, glowDot, lerp } from './canvas';
 
-const theme: Theme = {
-  accent: 'text-rose-400',
-  button: 'bg-gradient-to-r from-rose-500 to-pink-600 hover:from-rose-400 text-white shadow-lg shadow-rose-500/25',
-  badge: 'bg-rose-500/10 border border-rose-500/20 text-rose-400',
-};
 const COLORS = ['#f43f5e', '#fb7185', '#ec4899'];
 
 const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt, onProgress, resumeFrom }) => {
@@ -56,9 +51,12 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
   );
 
   const canvasRef = useCanvasLoop(DODGE_WIDTH, DODGE_HEIGHT, (ctx, now) => {
-    ctx.fillStyle = '#090d16';
+    const bg = ctx.createLinearGradient(0, 0, 0, DODGE_HEIGHT);
+    bg.addColorStop(0, '#0b0710');
+    bg.addColorStop(1, '#1a0b14');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, DODGE_WIDTH, DODGE_HEIGHT);
-    ctx.fillStyle = '#1e293b';
+    ctx.fillStyle = 'rgba(251,113,133,0.12)';
     ctx.fillRect(DODGE_LANE_WIDTH - 1, 0, 2, DODGE_HEIGHT);
     ctx.fillRect(DODGE_LANE_WIDTH * 2 - 1, 0, 2, DODGE_HEIGHT);
 
@@ -110,6 +108,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
   const toLane = (lane: number) => {
     if (stateRef.current?.targetLane === lane) return;
     soundFx.playClick();
+    haptic();
     sendInput(lane);
   };
 
@@ -137,20 +136,19 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
 
   const lane = stateRef.current?.targetLane ?? 1;
 
+  const LANE_ICON = [ChevronLeft, Circle, ChevronRight];
+  const secs = (n: number) => `${(n / 60).toFixed(1)}s`;
+
   return (
-    <div className="flex flex-col items-center justify-center w-full max-w-sm mx-auto p-3">
-      <GameHud hud={hud} label="Distance" theme={theme} survivalMode />
-      <div
-        onTouchStart={onTouch}
-        className="relative w-full aspect-[280/380] bg-zinc-950 border-2 border-zinc-800 rounded-2xl overflow-hidden shadow-2xl touch-none select-none"
-      >
+    <div className="flex flex-col items-center w-full max-w-sm mx-auto">
+      <GameHud hud={hud} gameId="neondodge" label="Survived" timeLimitSeconds={timeLimitSeconds} survivalMode formatScore={secs} />
+      <Board gameId="neondodge" className="aspect-[280/380] bg-zinc-950" onTouchStart={onTouch}>
         <canvas ref={canvasRef} className="w-full h-full touch-none block" />
         <GameOverlays
           hud={hud}
-          title="Neon Reflex Dodge"
-          howTo="Tap a lane (or use arrow keys) to slide over and dodge the walls. They keep speeding up, so the run ends when you crash. Last longest to win."
-          icon={<Zap className="w-7 h-7" />}
-          theme={theme}
+          gameId="neondodge"
+          howTo="Slide between lanes to dodge the walls. They keep speeding up, so the run ends when you crash. Last the longest to win."
+          controls={['Tap a lane', 'Lane pads', '← → keys']}
           isPractice={isPractice}
           timeLimitSeconds={timeLimitSeconds}
           getSeed={getSeed}
@@ -158,22 +156,30 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
           autoStartAt={autoStartAt}
           resumeFrom={resumeFrom}
           resume={resume}
+          formatScore={secs}
         />
-      </div>
-      <div className="w-full mt-3 grid grid-cols-3 gap-2">
-        {[0, 1, 2].map((l) => (
-          <button
-            key={l}
-            type="button"
-            disabled={!hud.running}
-            onClick={() => toLane(l)}
-            className={`py-3 rounded-xl border text-xs font-bold font-mono transition-colors ${
-              lane === l ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/30' : 'bg-zinc-900 text-zinc-400 border-zinc-800'
-            }`}
-          >
-            LANE {l + 1}
-          </button>
-        ))}
+      </Board>
+      <div className="w-full mt-4 grid grid-cols-3 gap-2">
+        {[0, 1, 2].map((l) => {
+          const Icon = LANE_ICON[l];
+          const active = lane === l && hud.running;
+          return (
+            <button
+              key={l}
+              type="button"
+              aria-label={['Left lane', 'Middle lane', 'Right lane'][l]}
+              disabled={!hud.running}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                toLane(l);
+              }}
+              className={`pad h-16 ${active ? '!bg-rose-500 !text-white !border-rose-300' : ''}`}
+              style={{ touchAction: 'none', boxShadow: active ? '0 0 24px -4px #fb7185' : undefined }}
+            >
+              <Icon className={l === 1 ? 'w-4 h-4' : 'w-7 h-7'} />
+            </button>
+          );
+        })}
       </div>
     </div>
   );

@@ -148,3 +148,23 @@ body {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 1ms !important; animation-iteration-count: 1 !important; transition-duration: 1ms !important; }
 }
+
+/* Countdown ring: drains once per second. */
+@keyframes bx-ring { from { stroke-dashoffset: 0 } to { stroke-dashoffset: 100 } }
+.countdown-ring { animation: bx-ring 1s linear both; }
+
+/* Game control pads: tactile press. */
+@layer components {
+  .pad {
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 1rem;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: #d9deea;
+    box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.35);
+    transition: transform 80ms ease, background-color 120ms ease;
+    -webkit-user-select: none; user-select: none;
+  }
+  .pad:active:not(:disabled) { transform: translateY(2px) scale(0.97); background: rgba(255, 255, 255, 0.16); box-shadow: none; }
+  .pad:disabled { opacity: 0.35; }
+}

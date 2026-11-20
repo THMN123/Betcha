@@ -3,7 +3,9 @@ import { CheckCircle2, AlertCircle, Info, XCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 const Toast: React.FC = () => {
-  const { toast } = useApp();
+  const { toast, activePlayingMatch, practiceGameId } = useApp();
+  // While playing, keep the top of the screen (scores, HUD) clear.
+  const playing = !!(activePlayingMatch || practiceGameId);
 
   if (!toast) return null;
 
@@ -22,7 +24,7 @@ const Toast: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-[calc(4rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[70] px-4 w-full max-w-md pointer-events-none animate-in">
+    <div className={`fixed ${playing ? 'bottom-[calc(1rem+env(safe-area-inset-bottom))]' : 'top-[calc(4rem+env(safe-area-inset-top))]'} left-1/2 -translate-x-1/2 z-[70] px-4 w-full max-w-md pointer-events-none animate-in`}>
       <div className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-[0_20px_50px_-15px_rgba(0,0,0,0.9)] ${borders[toast.type]}`}>
         {icons[toast.type]}
         <p className="text-xs sm:text-sm font-medium leading-snug">{toast.message}</p>
