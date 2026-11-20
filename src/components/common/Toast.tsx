@@ -15,15 +15,15 @@ const Toast: React.FC = () => {
   };
 
   const borders = {
-    success: 'border-emerald-500/40 bg-zinc-900/95 text-emerald-100 shadow-emerald-950/50',
-    info: 'border-indigo-500/40 bg-zinc-900/95 text-indigo-100 shadow-indigo-950/50',
-    warning: 'border-amber-500/40 bg-zinc-900/95 text-amber-100 shadow-amber-950/50',
-    error: 'border-rose-500/40 bg-zinc-900/95 text-rose-100 shadow-rose-950/50',
+    success: 'border-emerald-500/40 bg-zinc-850/95 text-emerald-100 shadow-emerald-950/50',
+    info: 'border-indigo-500/40 bg-zinc-850/95 text-indigo-100 shadow-indigo-950/50',
+    warning: 'border-amber-500/40 bg-zinc-850/95 text-amber-100 shadow-amber-950/50',
+    error: 'border-rose-500/40 bg-zinc-850/95 text-rose-100 shadow-rose-950/50',
   };
 
   return (
-    <div className="fixed top-16 left-1/2 -translate-x-1/2 z-50 px-4 w-full max-w-md pointer-events-none transition-all duration-300 animate-in fade-in slide-in-from-top-4">
-      <div className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-md shadow-xl ${borders[toast.type]}`}>
+    <div className="fixed top-[calc(4rem+env(safe-area-inset-top))] left-1/2 -translate-x-1/2 z-[70] px-4 w-full max-w-md pointer-events-none animate-in">
+      <div className={`pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-2xl border backdrop-blur-xl shadow-[0_20px_50px_-15px_rgba(0,0,0,0.9)] ${borders[toast.type]}`}>
         {icons[toast.type]}
         <p className="text-xs sm:text-sm font-medium leading-snug">{toast.message}</p>
       </div>

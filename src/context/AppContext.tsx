@@ -54,6 +54,10 @@ interface AppContextType {
   practiceGameId: GameId | null;
   startPractice: (gameId: GameId) => void;
   enterMatchArena: (match: MatchRoom) => void;
+  /** The create-match sheet: open with a game preselected, or null when closed. */
+  createSheetGame: GameId | null;
+  openCreateMatch: (gameId?: GameId) => void;
+  closeCreateMatch: () => void;
   exitArena: () => void;
 
   createMatch: (config: {
@@ -237,6 +241,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
 
   const [activePlayingMatch, setActivePlayingMatch] = useState<MatchRoom | null>(null);
+  const [createSheetGame, setCreateSheetGame] = useState<GameId | null>(null);
+  const openCreateMatch = useCallback((gameId: GameId = 'snake') => setCreateSheetGame(gameId), []);
+  const closeCreateMatch = useCallback(() => setCreateSheetGame(null), []);
   const [practiceGameId, setPracticeGameId] = useState<GameId | null>(null);
   const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
 
@@ -380,7 +387,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         id: `${row.match_id}_${row.player_id}`,
         rank: idx + 1,
         handle: row.handle,
-        avatar: row.avatar_url,
+        avatar: row.avatar_url ?? `https://api.dicebear.com/7.x/bottts/svg?seed=${row.player_id}`,
         gameTitle: GAMES_LIST.find((g) => g.id === row.game_id)?.title ?? 'Arcade',
         highScore: row.score ?? 0,
         payoutWon: fromCents(row.payout_cents),
@@ -833,6 +840,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         practiceGameId,
         startPractice,
         enterMatchArena,
+        createSheetGame,
+        openCreateMatch,
+        closeCreateMatch,
         exitArena,
         createMatch,
         joinMatch,

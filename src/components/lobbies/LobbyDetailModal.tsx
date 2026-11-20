@@ -5,6 +5,9 @@ import { GAMES_LIST } from '../../data/initialData';
 import { MatchRoom } from '../../types';
 import { cr, inviteUrl, shareInvite } from '../../utils/credits';
 import { canResume, loadCheckpoint } from '../../games/runCheckpoint';
+import Sheet from '../ui/Sheet';
+import GameCover from '../ui/GameCover';
+import StatusPill from './StatusPill';
 
 // Last moment a run can still come in (begin window + game time + submit grace, see 002/006).
 // After that, if the match still can't finish, players can ask for a refund.
@@ -59,92 +62,84 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
   const playersToShow = room.status === 'completed' || room.status === 'under_review' ? ranked : room.players;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm" onClick={onClose}>
-      <div
-        className="relative w-full max-w-lg bg-zinc-900 border border-zinc-800 rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95 max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <button onClick={onClose} className="absolute top-4 right-4 p-2 text-zinc-400 hover:text-white rounded-xl hover:bg-zinc-800 transition-colors">
-          <X className="w-5 h-5" />
-        </button>
-
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-4 pr-8">
-          <div className="w-12 h-12 shrink-0 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 font-mono font-black text-sm">
-            {cr(room.buyIn)}
+    <Sheet
+      open
+      onClose={onClose}
+      banner={
+        <GameCover gameId={room.gameId} className="h-36 sm:h-44">
+          <div className="absolute inset-0 bg-gradient-to-t from-zinc-900 via-zinc-900/30 to-transparent" />
+          <div className="absolute left-5 bottom-3 flex items-center gap-2">
+            <StatusPill room={room} userId={user.id} />
+            <span className="px-2 py-1 rounded-md bg-black/50 backdrop-blur text-[11px] font-bold text-white">{cr(room.buyIn)} buy-in</span>
           </div>
-          <div className="min-w-0">
-            <span className="text-[10px] font-mono font-bold text-emerald-400 uppercase tracking-wider">
-              {game?.title} · #{room.id}
-            </span>
-            <h2 className="text-xl font-extrabold text-white truncate">{room.title}</h2>
-          </div>
-        </div>
+        </GameCover>
+      }
+      eyebrow={`${game?.title} · #${room.id}`}
+      title={room.title}
+    >
+      <div className="pt-1">
 
         {/* Invite */}
         {room.status === 'waiting' && (
-          <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-between mb-5">
-            <div className="min-w-0 pr-2">
-              <span className="block text-[10px] text-zinc-400 font-mono uppercase">Invite link · code {room.inviteCode}</span>
-              <span className="text-[11px] font-bold text-emerald-400 font-mono truncate block">{inviteUrl(room.inviteCode)}</span>
+          <div className="p-3 pl-4 rounded-2xl bg-gradient-to-r from-emerald-400/15 to-emerald-400/5 border border-emerald-300/20 flex items-center justify-between gap-3 mb-5">
+            <div className="min-w-0">
+              <span className="block text-xs font-semibold text-emerald-200">Invite friends · code {room.inviteCode}</span>
+              <span className="text-xs text-zinc-400 truncate block">{inviteUrl(room.inviteCode)}</span>
             </div>
             <button
               type="button"
               onClick={onShare}
-              className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-xl text-xs font-bold flex items-center gap-1 shadow-md shrink-0 transition-colors"
+              className="h-10 px-4 bg-white hover:bg-zinc-200 text-zinc-950 rounded-xl text-sm font-bold flex items-center gap-1.5 shrink-0"
             >
-              {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+              {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
               <span>{copied ? 'Copied' : 'Share'}</span>
             </button>
           </div>
         )}
 
         {/* Pot */}
-        <div className="grid grid-cols-3 gap-2 font-mono text-center mb-5">
-          <div className="p-2 bg-zinc-950 rounded-xl border border-zinc-800">
-            <span className="block text-[10px] text-zinc-400 uppercase">Pot</span>
-            <span className="text-sm font-bold text-white">{cr(room.totalPot)}</span>
+        <div className="flex items-end justify-between rounded-2xl bg-white/[0.03] border border-white/[0.06] p-4 mb-5">
+          <div>
+            <span className="block text-xs text-zinc-400">{room.distribution === 'top_two' ? 'Prize · split 70/30' : 'Winner gets'}</span>
+            <span className="text-3xl font-extrabold text-emerald-300 tabular-nums">{cr(room.netPrizePool)}</span>
           </div>
-          <div className="p-2 bg-zinc-950 rounded-xl border border-amber-500/20">
-            <span className="block text-[10px] text-amber-400 uppercase">5% fee</span>
-            <span className="text-sm font-bold text-amber-400">-{cr(room.platformFee)}</span>
-          </div>
-          <div className="p-2 bg-emerald-500/10 rounded-xl border border-emerald-500/30">
-            <span className="block text-[10px] text-emerald-400 uppercase">{room.distribution === 'top_two' ? 'Prize (70/30)' : 'Winner gets'}</span>
-            <span className="text-sm font-extrabold text-emerald-400">{cr(room.netPrizePool)}</span>
+          <div className="text-right text-xs text-zinc-500 tabular-nums leading-relaxed">
+            pot {cr(room.totalPot)}
+            <br />
+            5% fee −{cr(room.platformFee)}
           </div>
         </div>
 
         {/* Players */}
         <div className="mb-6">
-          <h4 className="text-xs font-bold text-zinc-400 uppercase mb-3 flex items-center justify-between">
-            <span>Players ({room.players.length}/{room.maxPlayers})</span>
-            {room.status === 'waiting' && <span className="text-[10px] font-normal text-zinc-500">Buy-ins held until the match ends</span>}
+          <h4 className="mb-2 flex items-baseline justify-between gap-2">
+            <span className="text-xs font-bold uppercase tracking-[0.14em] text-zinc-400">Players {room.players.length}/{room.maxPlayers}</span>
+            {room.status === 'waiting' && <span className="text-xs text-zinc-500">Buy-ins held until it ends</span>}
           </h4>
 
           <div className="space-y-2">
             {playersToShow.map((p) => (
               <div
                 key={p.id}
-                className={`flex items-center justify-between p-3 rounded-xl border ${
-                  p.isCurrentUser ? 'bg-emerald-500/5 border-emerald-500/30' : 'bg-zinc-950 border-zinc-800'
+                className={`flex items-center justify-between gap-3 px-3 py-2.5 rounded-xl border ${
+                  p.isCurrentUser ? 'bg-emerald-400/[0.07] border-emerald-300/25' : 'bg-white/[0.03] border-white/[0.05]'
                 }`}
               >
                 <div className="flex items-center gap-3 min-w-0">
                   {room.status === 'completed' && (
-                    <span className="w-5 text-center font-mono font-black text-xs text-zinc-400">{p.rank}</span>
+                    <span className={`w-5 text-center font-extrabold text-sm ${p.rank === 1 ? 'text-amber-300' : 'text-zinc-500'}`}>{p.rank}</span>
                   )}
-                  <img src={p.avatar} alt="" className="w-8 h-8 rounded-full object-cover border border-zinc-700 shrink-0" />
+                  <img src={p.avatar} alt="" className="w-9 h-9 rounded-full object-cover shrink-0" />
                   <div className="min-w-0">
-                    <span className="flex items-center gap-1 text-xs font-bold text-white truncate">
+                    <span className="flex items-center gap-1 text-sm font-bold text-white truncate">
                       {p.name} {p.isCurrentUser && <span className="text-zinc-400 font-normal">(you)</span>}
                       {p.isHost && <Crown className="w-3 h-3 text-amber-400 shrink-0" />}
                     </span>
-                    <span className="text-[10px] text-zinc-400">{p.isHost ? 'Host' : 'Player'}</span>
+                    <span className="text-xs text-zinc-500">{p.isHost ? 'Host' : 'Player'}</span>
                   </div>
                 </div>
 
-                <div className="text-right shrink-0 font-mono text-[11px] font-bold">
+                <div className="text-right shrink-0 text-sm font-bold tabular-nums">
                   {room.status === 'waiting' &&
                     (p.isReady ? (
                       <span className="text-emerald-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" /> Ready</span>
@@ -176,7 +171,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
               type="button"
               disabled={busy || room.players.length >= room.maxPlayers}
               onClick={() => run(() => joinMatch(room.id))}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm disabled:opacity-50"
+              className="w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-extrabold text-sm disabled:opacity-50"
             >
               {room.players.length >= room.maxPlayers ? 'Lobby full' : `Join for ${cr(room.buyIn)}`}
             </button>
@@ -189,7 +184,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                   type="button"
                   disabled={busy || !canStart}
                   onClick={() => run(() => startMatchLobby(room.id))}
-                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 disabled:from-zinc-800 disabled:to-zinc-800 disabled:text-zinc-400"
+                  className="w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2 disabled:bg-white/[0.06] disabled:text-zinc-400"
                 >
                   {room.players.length < 2 ? (
                     <><Users className="w-4 h-4" /> Waiting for a friend to join</>
@@ -204,7 +199,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                   type="button"
                   disabled={busy}
                   onClick={() => run(() => togglePlayerReady(room.id))}
-                  className={`w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider transition-colors disabled:opacity-50 ${
+                  className={`w-full h-12 rounded-xl font-extrabold text-sm transition-colors disabled:opacity-50 ${
                     me.isReady ? 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700' : 'bg-emerald-500 text-zinc-950 hover:bg-emerald-400'
                   }`}
                 >
@@ -217,7 +212,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                 onClick={() => {
                   if (!isHost || window.confirm('Cancel this lobby? Everyone gets their buy-in back.')) run(() => leaveMatch(room.id));
                 }}
-                className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full h-11 rounded-xl bg-white/[0.06] hover:bg-white/10 text-zinc-300 font-bold text-xs flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <LogOut className="w-3.5 h-3.5" />
                 {isHost ? 'Cancel lobby & refund everyone' : 'Leave lobby & get refund'}
@@ -232,7 +227,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                 onClose();
                 enterMatchArena(room);
               }}
-              className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+              className="w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2"
             >
               <Play className="w-5 h-5 fill-current" /> Play your run now
             </button>
@@ -248,14 +243,14 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                     onClose();
                     enterMatchArena(room);
                   }}
-                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+                  className="w-full h-12 rounded-xl bg-emerald-400 hover:bg-emerald-300 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2"
                 >
                   <Play className="w-5 h-5 fill-current" /> Resume my run
                 </button>
               );
             }
             return (
-              <div className="p-3 rounded-xl bg-zinc-950 border border-amber-500/30 text-center text-xs text-amber-200">
+              <div className="p-3 rounded-xl bg-amber-400/[0.06] border border-amber-300/25 text-center text-xs text-amber-200">
                 {cp
                   ? "Your run was cut off and there's no time left to finish it. The moves you made are submitted for scoring when the game timer runs out."
                   : "Your run was started on another device or browser. Finish it there; if it isn't finished in time it counts as 0."}
@@ -264,7 +259,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
           })()}
 
           {room.status === 'in_progress' && me && me.score !== undefined && (
-            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-center text-xs text-zinc-300 space-y-1">
+            <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] text-center text-xs text-zinc-300 space-y-1">
               <p>
                 Your score is in. Waiting for {pending} more player{pending === 1 ? '' : 's'}.
               </p>
@@ -280,7 +275,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
               const waitingFor = room.players.filter((p) => !refund.ackedBy.includes(p.id));
               const iAcked = refund.ackedBy.includes(user.id);
               return (
-                <div className="p-3 rounded-xl bg-zinc-950 border border-indigo-500/30 text-xs space-y-2">
+                <div className="p-3 rounded-xl bg-indigo-400/[0.06] border border-indigo-300/25 text-xs space-y-2">
                   <p className="font-bold text-indigo-300">Refund requested by {refund.requestedBy === user.id ? 'you' : name(refund.requestedBy)}</p>
                   <p className="text-zinc-300 italic break-words">"{refund.reason}"</p>
                   <ul className="text-[11px] space-y-0.5">
@@ -314,7 +309,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
             // Refunds can be asked for once the time to play has run out and the match still can't finish.
             if (secondsToSettle === null || secondsToSettle > 0) return null;
             return (
-              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-2">
+              <div className="p-3 rounded-xl bg-white/[0.03] border border-white/[0.06] text-xs space-y-2">
                 {refund?.status === 'rejected' && (
                   <p className="text-amber-200">
                     An admin turned down the last refund request{refund.adminNote ? `: "${refund.adminNote}"` : '.'}
@@ -328,7 +323,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
                   <button
                     type="button"
                     onClick={() => setAskingRefund(true)}
-                    className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs"
+                    className="w-full h-11 rounded-xl bg-white/[0.06] hover:bg-white/10 text-zinc-200 font-bold text-xs"
                   >
                     Ask for a refund
                   </button>
@@ -394,7 +389,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
           )}
 
           {room.status === 'cancelled' && (
-            <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-center text-xs text-zinc-400">
+            <div className="p-3 bg-white/[0.03] border border-white/[0.06] rounded-xl text-center text-xs text-zinc-400">
               <ShieldCheck className="w-4 h-4 inline mr-1" />
               {room.refund?.status === 'approved' ? (
                 <>
@@ -409,7 +404,7 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
           )}
         </div>
       </div>
-    </div>
+    </Sheet>
   );
 };
 

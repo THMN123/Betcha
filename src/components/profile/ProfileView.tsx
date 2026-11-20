@@ -1,205 +1,103 @@
 import React from 'react';
-import {
-  User,
-  Trophy,
-  Flame,
-  Award,
-  ShieldCheck,
-  Zap,
-  Crown,
-  Gamepad2,
-  Users,
-  CheckCircle2,
-  Volume2,
-  VolumeX,
-  LogOut,
-  UserCheck,
-} from 'lucide-react';
+import { Award, LogOut, ChevronRight } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import MorphingHeading from '../common/MorphingHeading';
 import { cr } from '../../utils/credits';
 import AdminReviewPanel from './AdminReviewPanel';
 import GameErrorBoundary from '../common/GameErrorBoundary';
+import GameCover from '../ui/GameCover';
+import StatusPill from '../lobbies/StatusPill';
+import { GAMES_LIST } from '../../data/initialData';
 
+/** Player card, stats, trophies and match history. */
 const ProfileView: React.FC = () => {
-  const { user, rooms, logout } = useApp();
-
+  const { user, rooms, logout, setSelectedRoomId } = useApp();
   const userMatches = rooms.filter((r) => r.players.some((p) => p.id === user.id));
 
+  const stats = [
+    { label: 'Matches', value: String(user.matchesPlayed) },
+    { label: 'Wins', value: String(user.winsCount) },
+    { label: 'Win rate', value: `${user.winRate}%` },
+    { label: 'Won', value: cr(user.totalEarnings), accent: true },
+  ];
+
   return (
-    <div className="space-y-6 pb-24 animate-in fade-in">
-      {/* Profile Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-zinc-900 via-zinc-950 to-indigo-950 border border-zinc-800 p-6 shadow-2xl">
-        <div className="flex flex-col sm:flex-row items-center gap-5">
-          <div className="relative">
-            <img
-              src={user.avatar}
-              alt={user.displayName}
-              className="w-20 h-20 rounded-full object-cover border-2 border-emerald-500 shadow-xl"
-            />
-            <span className="absolute bottom-0 right-0 p-1 bg-emerald-500 text-zinc-950 rounded-full shadow-md">
-              <Crown className="w-4 h-4 fill-current stroke-none" />
-            </span>
-          </div>
-
-          <div className="text-center sm:text-left flex-1">
-            <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
-              <MorphingHeading as="h1" glowColor="indigo" className="text-2xl font-black text-white">
-                {user.displayName}
-              </MorphingHeading>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                {user.vipTier} VIP
+    <div className="space-y-8">
+      {/* Player card */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-zinc-900">
+        <div className="h-24 sm:h-32 bg-gradient-to-r from-emerald-500/40 via-indigo-500/30 to-fuchsia-500/30" />
+        <div className="px-5 pb-5 -mt-12 sm:-mt-14 flex flex-col sm:flex-row sm:items-end gap-4">
+          <img src={user.avatar} alt="" className="w-24 h-24 sm:w-28 sm:h-28 rounded-full object-cover ring-4 ring-zinc-900 bg-zinc-800" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight truncate">{user.displayName}</h1>
+              <span className="px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wide bg-indigo-400/15 text-indigo-200 border border-indigo-300/30">
+                {user.vipTier}
               </span>
             </div>
-
-            <p className="text-xs font-mono text-zinc-400 mb-3">{user.handle}</p>
-
-            <div className="flex flex-wrap justify-center sm:justify-start gap-2 text-xs text-zinc-300">
-              <span className="px-3 py-1 rounded-xl bg-zinc-900 border border-zinc-800 font-mono">
-                Fav Game: <strong className="text-emerald-400">{user.favoriteGame}</strong>
-              </span>
-              <span className="px-3 py-1 rounded-xl bg-zinc-900 border border-zinc-800 font-mono">
-                Win Rate: <strong className="text-emerald-400">{user.winRate}%</strong>
-              </span>
-            </div>
+            <div className="text-sm text-zinc-400">{user.handle}</div>
           </div>
         </div>
-      </div>
+        <dl className="grid grid-cols-4 border-t border-white/[0.06] divide-x divide-white/[0.06]">
+          {stats.map((s) => (
+            <div key={s.label} className="px-2 py-3 text-center">
+              <dt className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wide">{s.label}</dt>
+              <dd className={`text-base sm:text-xl font-extrabold tabular-nums truncate ${s.accent ? 'text-emerald-300' : 'text-white'}`}>{s.value}</dd>
+            </div>
+          ))}
+        </dl>
+      </section>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
-        <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md">
-          <span className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-            Matches Played
-          </span>
-          <span className="text-2xl font-black text-white">{user.matchesPlayed}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md">
-          <span className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-            Total Wins
-          </span>
-          <span className="text-2xl font-black text-emerald-400">{user.winsCount}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md">
-          <span className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-            Win Percentage
-          </span>
-          <span className="text-2xl font-black text-indigo-400">{user.winRate}%</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-zinc-900 border border-zinc-800 shadow-md">
-          <span className="block text-[10px] text-zinc-400 uppercase font-semibold mb-1">
-            Total Winnings
-          </span>
-          <span className="text-2xl font-black text-emerald-400">{cr(user.totalEarnings)}</span>
-        </div>
-      </div>
-
-      {/* Trophy Cabinet & Badges */}
-      <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Trophy className="w-5 h-5 text-amber-400" />
-          <h3 className="text-sm font-bold text-white uppercase tracking-wider">
-            Arcade Badges & Trophy Cabinet
-          </h3>
-        </div>
-
+      {/* Trophies */}
+      <section>
+        <h2 className="text-lg font-extrabold text-white mb-3">Trophies</h2>
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          {user.badges.map((badge) => (
+          {user.badges.map((b) => (
             <div
-              key={badge.id}
-              className={`p-3 rounded-xl border flex items-center gap-3 transition-all ${
-                badge.unlocked
-                  ? 'bg-zinc-950 border-amber-500/30 text-white'
-                  : 'bg-zinc-950/40 border-zinc-850 text-zinc-600 opacity-50'
-              }`}
+              key={b.id}
+              className={`rounded-2xl p-4 border ${b.unlocked ? 'bg-gradient-to-br from-amber-400/15 to-transparent border-amber-300/25' : 'bg-white/[0.02] border-white/[0.05] opacity-50'}`}
             >
-              <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                  badge.unlocked ? 'bg-amber-500/15 text-amber-400' : 'bg-zinc-800 text-zinc-600'
-                }`}
-              >
-                <Award className="w-4 h-4" />
-              </div>
-              <div>
-                <h4 className="text-xs font-bold leading-tight">{badge.title}</h4>
-                <p className="text-[10px] text-zinc-400 leading-tight">{badge.description}</p>
-              </div>
+              <span className={`w-10 h-10 rounded-xl flex items-center justify-center ${b.unlocked ? 'bg-amber-400/20 text-amber-300' : 'bg-white/5 text-zinc-600'}`}>
+                <Award className="w-5 h-5" />
+              </span>
+              <div className="mt-3 text-sm font-bold text-white leading-tight">{b.title}</div>
+              <div className="text-xs text-zinc-400 mt-0.5 break-words">{b.unlocked ? b.description : `Locked · ${b.description}`}</div>
             </div>
           ))}
         </div>
-      </div>
+      </section>
 
-      {/* Accepted Friends & Invite Connections */}
-      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="text-sm font-bold text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-emerald-400" />
-              <span>Accepted Friends & Connections</span>
-            </h3>
-            <p className="text-xs text-zinc-400">
-              Only real friends who accepted your tournament invite links or friend requests appear here
-            </p>
-          </div>
-        </div>
-
-        <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 text-center">
-          <UserCheck className="w-8 h-8 text-zinc-600 mx-auto mb-2" />
-          <p className="text-xs text-zinc-400">No accepted friend links yet.</p>
-          <p className="text-[11px] text-zinc-500 mt-1">
-            Share a match invite link from the Lobbies tab to invite your friends!
-          </p>
-        </div>
-      </div>
-
-      {/* Recent Match History */}
-      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5">
-        <h3 className="text-sm font-bold text-white mb-3">Recent Tournament History</h3>
-
+      {/* Match history */}
+      <section>
+        <h2 className="text-lg font-extrabold text-white mb-3">Recent matches</h2>
         {userMatches.length === 0 ? (
-          <p className="text-xs text-zinc-500 font-mono">No matches played yet.</p>
+          <p className="text-sm text-zinc-500">No matches played yet.</p>
         ) : (
-          <div className="space-y-2">
-            {userMatches.map((match) => (
-              <div
-                key={match.id}
-                className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs font-mono"
-              >
-                <div>
-                  <span className="font-bold text-white block">{match.title}</span>
-                  <span className="text-[10px] text-zinc-400">
-                    Buy-in: {cr(match.buyIn)} • #{match.id}
-                  </span>
-                </div>
-
-                <div className="text-right">
-                  {(() => {
-                    const mine = match.players.find((p) => p.isCurrentUser);
-                    if (match.status === 'completed' && (mine?.payout ?? 0) > 0) {
-                      return (
-                        <span className="text-xs font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded">
-                          +{cr(mine?.payout ?? 0)}
-                        </span>
-                      );
-                    }
-                    const label: Record<string, string> = {
-                      waiting: 'In lobby',
-                      in_progress: 'Playing',
-                      under_review: 'Under review',
-                      completed: 'No prize',
-                      cancelled: 'Refunded',
-                    };
-                    return <span className="text-xs font-semibold text-zinc-400">{label[match.status] ?? match.status}</span>;
-                  })()}
-                </div>
-              </div>
-            ))}
-          </div>
+          <ul className="rounded-2xl bg-zinc-900/70 border border-white/[0.07] divide-y divide-white/[0.05] overflow-hidden">
+            {userMatches.map((m) => {
+              const mine = m.players.find((p) => p.isCurrentUser);
+              return (
+                <li key={m.id}>
+                  <button type="button" onClick={() => setSelectedRoomId(m.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-white/[0.03]">
+                    <GameCover gameId={m.gameId} className="w-10 h-10 rounded-lg shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-white truncate">{m.title}</div>
+                      <div className="text-xs text-zinc-500 truncate">
+                        {GAMES_LIST.find((g) => g.id === m.gameId)?.title} · {cr(m.buyIn)} buy-in
+                      </div>
+                    </div>
+                    {m.status === 'completed' && (mine?.payout ?? 0) > 0 ? (
+                      <span className="text-sm font-extrabold text-emerald-300 tabular-nums">+{cr(mine?.payout ?? 0)}</span>
+                    ) : (
+                      <StatusPill room={m} userId={user.id} />
+                    )}
+                    <ChevronRight className="w-4 h-4 text-zinc-600 shrink-0" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
-      </div>
+      </section>
 
       {user.isAdmin && (
         <GameErrorBoundary onReset={() => undefined}>
@@ -207,22 +105,20 @@ const ProfileView: React.FC = () => {
         </GameErrorBoundary>
       )}
 
-      {/* Sign Out Section */}
-      <div className="pt-2">
+      <section className="pt-2">
         <button
           type="button"
           onClick={logout}
-          className="w-full py-3 px-4 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 text-rose-400 hover:text-rose-300 font-bold text-xs flex items-center justify-center gap-2 transition-all shadow-sm group"
+          className="w-full h-12 rounded-2xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.07] text-rose-300 font-bold text-sm flex items-center justify-center gap-2"
         >
-          <LogOut className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          <span>Sign Out / Return to Auth Screen</span>
+          <LogOut className="w-4 h-4" /> Sign out
         </button>
-        <p className="mt-3 text-center text-[11px] text-zinc-500">
+        <p className="mt-3 text-center text-xs text-zinc-500">
           <a href="/privacy.html" className="underline hover:text-zinc-300">Privacy Policy</a>
           {' · '}
           <a href="/terms.html" className="underline hover:text-zinc-300">Terms of Service</a>
         </p>
-      </div>
+      </section>
     </div>
   );
 };

@@ -1,298 +1,174 @@
-import React, { useState, useEffect } from 'react';
-import { Gamepad2, Swords, Trophy, Zap, Flame, Users, Sparkles, ArrowRight, Play, ShieldCheck, DollarSign } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Swords, Timer, Gauge, Users, ChevronRight, Trophy } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { GAMES_LIST } from '../../data/initialData';
-import { GameId } from '../../types';
-
-import MorphingHeading from '../common/MorphingHeading';
-import { HomeSkeleton } from '../common/SkeletonLoader';
+import type { GameId } from '../../types';
+import GameCover, { GAME_ACCENT } from '../ui/GameCover';
+import MatchTile from '../lobbies/MatchTile';
 import { cr } from '../../utils/credits';
 
+const SectionHeader: React.FC<{ title: string; action?: { label: string; onClick: () => void } }> = ({ title, action }) => (
+  <div className="flex items-end justify-between mb-3">
+    <h2 className="text-lg sm:text-xl font-extrabold text-white tracking-tight">{title}</h2>
+    {action && (
+      <button type="button" onClick={action.onClick} className="text-sm font-semibold text-zinc-400 hover:text-white flex items-center gap-0.5">
+        {action.label}
+        <ChevronRight className="w-4 h-4" />
+      </button>
+    )}
+  </div>
+);
+
+/** Console-style home: a spotlight on the selected game, then shelves of games and matches. */
 const HomeView: React.FC = () => {
-  const {
-    startPractice,
-    rooms,
-    joinMatch,
-    setCurrentTab,
-    setSelectedRoomId,
-    leaderboard,
-    createMatch,
-  } = useApp();
+  const { startPractice, rooms, joinMatch, setCurrentTab, setSelectedRoomId, leaderboard, openCreateMatch, user } = useApp();
+  const [focused, setFocused] = useState<GameId>('snake');
+  const game = GAMES_LIST.find((g) => g.id === focused)!;
+  const accent = GAME_ACCENT[focused];
 
-
-  const waitingRooms = rooms.filter((r) => r.status === 'waiting');
-
-  const handleQuickMatchOfDay = () => {
-    // Quick create or join a 5 credit Cyber Snake match
-    const existing = waitingRooms.find((r) => r.gameId === 'snake' && r.buyIn === 5);
-    if (existing) {
-      joinMatch(existing.id);
-    } else {
-      createMatch({
-        gameId: 'snake',
-        title: 'Quick Match of the Day (5 cr Snake)',
-        buyIn: 5,
-        maxPlayers: 4,
-        distribution: 'winner_takes_all',
-      });
-    }
-  };
+  const myActive = rooms.filter(
+    (r) => (r.status === 'waiting' || r.status === 'in_progress' || r.status === 'under_review') && r.players.some((p) => p.isCurrentUser)
+  );
+  const openRooms = rooms.filter((r) => r.status === 'waiting' && !r.players.some((p) => p.isCurrentUser));
 
   return (
-    <div className="space-y-6 pb-24 animate-in fade-in">
-      {/* Featured Banner: Quick Match of the Day */}
-      <section className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-emerald-950 via-zinc-900 to-indigo-950 border border-emerald-500/30 p-5 sm:p-6 shadow-2xl">
-        <div className="absolute -right-12 -bottom-12 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute top-0 right-0 p-3 opacity-10">
-          <Gamepad2 className="w-48 h-48 text-emerald-400" />
-        </div>
-
-        <div className="relative z-10 max-w-lg">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-xs font-bold mb-3">
-            <Flame className="w-3.5 h-3.5" />
-            <span>FEATURED TOURNAMENT OF THE DAY</span>
+    <div className="space-y-8 sm:space-y-10">
+      {/* Spotlight */}
+      <section
+        key={focused}
+        className="relative -mx-4 -mt-4 sm:mx-0 sm:mt-0 sm:rounded-3xl overflow-hidden border-y sm:border border-white/[0.07] animate-in"
+      >
+        <GameCover gameId={focused} className="absolute inset-0 sm:left-[40%] opacity-90" />
+        <div className="absolute inset-0 bg-gradient-to-t sm:bg-gradient-to-r from-zinc-950 from-30% sm:from-0% via-zinc-950/60 sm:via-zinc-950/85 to-transparent" />
+        <div
+          className="absolute -left-24 -top-24 w-80 h-80 rounded-full blur-3xl opacity-25 pointer-events-none"
+          style={{ background: accent.glow }}
+        />
+        <div className="relative px-5 sm:px-10 pt-32 sm:pt-14 pb-6 sm:pb-12 max-w-xl">
+          <div className={`text-xs font-bold uppercase tracking-[0.18em] ${accent.text}`}>{game.category}</div>
+          <h1 className="mt-1 text-4xl sm:text-5xl font-extrabold text-white tracking-tight leading-[1.05]">{game.title}</h1>
+          <p className="mt-3 text-sm sm:text-base text-zinc-300 leading-relaxed line-clamp-3">{game.description}</p>
+          <div className="mt-4 flex flex-wrap gap-2 text-xs font-semibold text-zinc-200">
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur">
+              <Timer className="w-3.5 h-3.5" /> {game.avgDuration}
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur">
+              <Gauge className="w-3.5 h-3.5" /> {game.difficulty}
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/10 backdrop-blur">
+              <Users className="w-3.5 h-3.5" /> 2–8 players
+            </span>
           </div>
-
-          <MorphingHeading as="h1" glowColor="emerald" className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight mb-2">
-            5 Credit Cyber Snake Showdown
-          </MorphingHeading>
-
-          <p className="text-xs sm:text-sm text-zinc-300 mb-5 leading-relaxed">
-            Fast 60-second speed runs. 4 players enter, high score takes the <span className="font-bold text-emerald-400">19 cr pot</span> after the 5% fee!
-          </p>
-
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="mt-6 flex gap-3">
             <button
               type="button"
-              onClick={handleQuickMatchOfDay}
-              className="px-5 py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-zinc-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/25 flex items-center gap-2 transition-all hover:scale-105"
+              onClick={() => openCreateMatch(focused)}
+              className="h-12 px-6 rounded-full bg-white hover:bg-zinc-200 text-zinc-950 font-extrabold text-sm flex items-center gap-2 shadow-[0_10px_30px_-10px_rgba(255,255,255,0.5)]"
             >
-              <Zap className="w-4 h-4 fill-current stroke-none" />
-              <span>Enter 5 cr Tournament</span>
+              <Swords className="w-4 h-4" /> Challenge friends
             </button>
-
             <button
               type="button"
-              onClick={() => startPractice('snake')}
-              className="px-4 py-3 rounded-2xl bg-zinc-900/80 hover:bg-zinc-800 border border-zinc-700/80 text-zinc-200 font-bold text-xs sm:text-sm transition-all"
+              onClick={() => startPractice(focused)}
+              className="h-12 px-5 rounded-full bg-white/10 hover:bg-white/15 backdrop-blur text-white font-bold text-sm flex items-center gap-2 border border-white/10"
             >
-              Practice Run (Free)
+              <Play className="w-4 h-4 fill-current" /> Practice
             </button>
           </div>
         </div>
       </section>
 
-      {/* Arcade Mini-Games Grid */}
+      {/* Games shelf: selecting one puts it in the spotlight */}
       <section>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <div>
-            <div className="flex items-center gap-2">
-              <Gamepad2 className="w-5 h-5 text-emerald-400" />
-              <MorphingHeading as="h2" glowColor="emerald" className="text-lg font-bold text-white">
-                Casual Arcade Games
-              </MorphingHeading>
-            </div>
-            <p className="text-xs text-zinc-400">Select a game to practice or launch a wager lobby</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          {GAMES_LIST.map((game) => (
-            <div
-              key={game.id}
-              className={`relative group overflow-hidden rounded-2xl bg-gradient-to-b ${game.bgGradient} border border-zinc-800 hover:border-zinc-700 p-5 transition-all hover:-translate-y-1 shadow-xl flex flex-col justify-between`}
-            >
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <span
-                    className="px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider font-mono border"
-                    style={{
-                      backgroundColor: `${game.themeColor}15`,
-                      color: game.themeColor,
-                      borderColor: `${game.themeColor}30`,
-                    }}
-                  >
-                    {game.category}
-                  </span>
-
-                  <span className="text-[11px] font-mono font-semibold text-zinc-400 flex items-center gap-1">
-                    <Sparkles className="w-3 h-3 text-amber-400" />
-                    {game.popularityScore}% Popular
-                  </span>
-                </div>
-
-                <h3 className="text-lg font-black text-white mb-1">{game.title}</h3>
-                <p className="text-xs text-zinc-400 mb-4 line-clamp-2">{game.description}</p>
-              </div>
-
-              <div className="space-y-2 pt-2 border-t border-zinc-800/80">
-                <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono mb-2">
-                  <span>Run Time: {game.avgDuration}</span>
-                  <span>Difficulty: {game.difficulty}</span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => startPractice(game.id)}
-                    className="py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 font-bold text-xs transition-colors flex items-center justify-center gap-1"
-                  >
-                    <Play className="w-3 h-3 text-emerald-400 fill-current" />
-                    <span>Practice</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      createMatch({
-                        gameId: game.id,
-                        title: `${game.title} Tournament`,
-                        buyIn: 5,
-                        maxPlayers: 4,
-                        distribution: 'winner_takes_all',
-                      });
-                    }}
-                    className="py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-bold text-xs shadow-md flex items-center justify-center gap-1 transition-all"
-                  >
-                    <Swords className="w-3 h-3" />
-                    <span>Wager 5 cr</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          ))}
+        <SectionHeader title="Games" />
+        <div className="shelf sm:grid sm:grid-cols-3 sm:overflow-visible sm:mx-0 sm:px-0 sm:gap-4">
+          {GAMES_LIST.map((g) => {
+            const active = g.id === focused;
+            return (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => setFocused(g.id)}
+                aria-pressed={active}
+                className={`tile-focus w-36 sm:w-auto rounded-2xl overflow-hidden text-left ${active ? 'tile-selected' : ''}`}
+              >
+                <GameCover gameId={g.id} showTitle className="aspect-[3/4] sm:aspect-[16/10]" />
+              </button>
+            );
+          })}
         </div>
       </section>
 
-      {/* Live Friend Lobbies Ticker */}
-      <section>
-        <div className="flex items-center justify-between mb-3 px-1">
-          <div>
-            <div className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-indigo-400" />
-              <MorphingHeading as="h2" glowColor="indigo" className="text-lg font-bold text-white">
-                Active Friend Rooms
-              </MorphingHeading>
-            </div>
-            <p className="text-xs text-zinc-400">Open lobbies waiting for participants</p>
+      {/* Your matches */}
+      {myActive.length > 0 && (
+        <section>
+          <SectionHeader title="Continue" action={{ label: 'All matches', onClick: () => setCurrentTab('lobbies') }} />
+          <div className="shelf md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible md:mx-0 md:px-0 md:gap-4">
+            {myActive.map((room) => (
+              <MatchTile key={room.id} room={room} userId={user.id} onOpen={() => setSelectedRoomId(room.id)} className="w-[85%] max-w-[340px] md:w-auto md:max-w-none" />
+            ))}
           </div>
+        </section>
+      )}
 
-          <button
-            type="button"
-            onClick={() => setCurrentTab('lobbies')}
-            className="text-xs font-bold text-emerald-400 hover:text-emerald-300 flex items-center gap-1"
-          >
-            <span>View All ({waitingRooms.length})</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        {waitingRooms.length === 0 ? (
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center">
-            <p className="text-xs text-zinc-400 mb-3">No active lobbies right now.</p>
+      {/* Open lobbies */}
+      <section>
+        <SectionHeader title="Open lobbies" action={openRooms.length ? { label: 'See all', onClick: () => setCurrentTab('lobbies') } : undefined} />
+        {openRooms.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-white/10 p-6 text-center">
+            <p className="text-sm text-zinc-300 font-semibold">No open lobbies right now</p>
+            <p className="text-xs text-zinc-500 mt-1">Start one and send the link to your friends.</p>
             <button
               type="button"
-              onClick={() => setCurrentTab('lobbies')}
-              className="px-4 py-2 rounded-xl bg-emerald-500 text-zinc-950 font-bold text-xs"
+              onClick={() => openCreateMatch(focused)}
+              className="mt-4 h-10 px-5 rounded-full bg-white text-zinc-950 font-bold text-sm"
             >
-              Create New Match
+              Create a match
             </button>
           </div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {waitingRooms.slice(0, 4).map((room) => {
-              const game = GAMES_LIST.find((g) => g.id === room.gameId);
-              return (
-                <div
-                  key={room.id}
-                  onClick={() => {
-                    setSelectedRoomId(room.id);
-                    setCurrentTab('lobbies');
-                  }}
-                  className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-zinc-700 rounded-2xl p-4 transition-all cursor-pointer shadow-md flex items-center justify-between"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-zinc-950 border border-zinc-800 flex items-center justify-center font-bold text-emerald-400 font-mono text-sm shrink-0">
-                      {cr(room.buyIn)}
-                    </div>
-
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-white leading-tight">{room.title}</span>
-                      </div>
-                      <p className="text-[11px] text-zinc-400 font-mono mt-0.5">
-                        Host: {room.hostName} • {room.players.length}/{room.maxPlayers} Ready
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      joinMatch(room.id);
-                    }}
-                    className="px-3 py-2 rounded-xl bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-bold text-xs shrink-0"
-                  >
-                    Join Room
-                  </button>
-                </div>
-              );
-            })}
+          <div className="shelf md:grid md:grid-cols-2 lg:grid-cols-3 md:overflow-visible md:mx-0 md:px-0 md:gap-4">
+            {openRooms.slice(0, 6).map((room) => (
+              <MatchTile
+                key={room.id}
+                room={room}
+                userId={user.id}
+                onOpen={() => setSelectedRoomId(room.id)}
+                onJoin={() => joinMatch(room.id)}
+                className="w-[85%] max-w-[340px] md:w-auto md:max-w-none"
+              />
+            ))}
           </div>
         )}
       </section>
 
-      {/* Daily Leaderboard Highlights */}
-      <section className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <Trophy className="w-5 h-5 text-amber-400" />
-            <div>
-              <h3 className="text-sm font-bold text-white">Daily Tournament Leaderboard</h3>
-              <p className="text-[11px] text-zinc-400">Top earning arcade players today</p>
-            </div>
-          </div>
-        </div>
-
+      {/* Top earners */}
+      <section>
+        <SectionHeader title="Top earners" />
         {leaderboard.length === 0 ? (
-          <div className="p-4 rounded-xl bg-zinc-950 border border-zinc-850 text-center">
-            <p className="text-xs text-zinc-400">No tournament scores recorded yet today.</p>
-            <p className="text-[11px] text-zinc-500 mt-0.5">Win a tournament match to claim the #1 rank!</p>
-          </div>
+          <p className="text-sm text-zinc-500">No winners yet. Win a match to claim #1.</p>
         ) : (
-          <div className="space-y-2">
-            {leaderboard.slice(0, 4).map((entry) => (
-              <div
-                key={entry.id}
-                className="flex items-center justify-between p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="w-5 h-5 rounded-full bg-zinc-900 font-mono font-bold text-zinc-400 flex items-center justify-center text-[10px]">
-                    #{entry.rank}
-                  </span>
-
-                  <img
-                    src={entry.avatar}
-                    alt={entry.handle}
-                    className="w-7 h-7 rounded-full object-cover border border-zinc-700"
-                  />
-
-                  <div>
-                    <span className="font-bold text-white block leading-tight">{entry.handle}</span>
-                    <span className="text-[10px] text-zinc-400 font-mono">{entry.gameTitle}</span>
+          <ol className="rounded-2xl bg-zinc-900/70 border border-white/[0.07] divide-y divide-white/[0.05] overflow-hidden">
+            {leaderboard.slice(0, 5).map((e) => (
+              <li key={e.id} className="flex items-center gap-3 px-4 py-3">
+                <span
+                  className={`w-7 text-center font-extrabold tabular-nums ${
+                    e.rank === 1 ? 'text-amber-300' : e.rank === 2 ? 'text-zinc-200' : e.rank === 3 ? 'text-orange-300' : 'text-zinc-500'
+                  }`}
+                >
+                  {e.rank === 1 ? <Trophy className="w-5 h-5 mx-auto" /> : e.rank}
+                </span>
+                <img src={e.avatar} alt="" className="w-9 h-9 rounded-full object-cover" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-bold text-white truncate">{e.handle}</div>
+                  <div className="text-xs text-zinc-500 truncate">
+                    {e.gameTitle} · {e.highScore.toLocaleString()} pts
                   </div>
                 </div>
-
-                <div className="text-right">
-                  <span className="block font-mono font-bold text-emerald-400 text-xs">
-                    +{cr(entry.payoutWon)}
-                  </span>
-                  <span className="text-[10px] text-zinc-500 font-mono">{entry.highScore.toLocaleString()} PTS</span>
-                </div>
-              </div>
+                <div className="text-sm font-extrabold text-emerald-300 tabular-nums">+{cr(e.payoutWon)}</div>
+              </li>
             ))}
-          </div>
+          </ol>
         )}
       </section>
     </div>

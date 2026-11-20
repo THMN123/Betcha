@@ -11,6 +11,15 @@ import ProfileView from './components/profile/ProfileView';
 const PlayArenaModal = lazy(() => import('./components/arena/PlayArenaModal'));
 const AuthLanding = lazy(() => import('./components/auth/AuthLanding'));
 import SetNewPasswordModal from './components/auth/SetNewPasswordModal';
+import CreateMatchSheet from './components/lobbies/CreateMatchSheet';
+import LobbyDetailModal from './components/lobbies/LobbyDetailModal';
+
+/** The open lobby card, available from every screen (Home, Matches, notifications). */
+const LobbySheetHost: React.FC = () => {
+  const { selectedRoomId, setSelectedRoomId, rooms } = useApp();
+  const room = selectedRoomId ? rooms.find((r) => r.id === selectedRoomId) : null;
+  return room ? <LobbyDetailModal room={room} onClose={() => setSelectedRoomId(null)} /> : null;
+};
 
 const AppContent: React.FC = () => {
   const { currentTab, isAuthenticated, authReady } = useApp();
@@ -39,7 +48,7 @@ const AppContent: React.FC = () => {
       <Header />
       <Toast />
 
-      <main className="flex-1 max-w-4xl mx-auto w-full px-3 sm:px-4 pt-3 sm:pt-6 overflow-x-hidden">
+      <main className="flex-1 max-w-6xl mx-auto w-full px-4 pt-4 sm:pt-6 pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-12">
         <div key={currentTab} className="tab-enter">
           {currentTab === 'home' && <HomeView />}
           {currentTab === 'lobbies' && <LobbiesView />}
@@ -53,6 +62,8 @@ const AppContent: React.FC = () => {
         <PlayArenaModal />
       </Suspense>
       <SetNewPasswordModal />
+      <LobbySheetHost />
+      <CreateMatchSheet />
     </div>
   );
 };

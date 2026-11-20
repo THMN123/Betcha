@@ -1,88 +1,91 @@
 import React, { useState } from 'react';
-import { Wallet, Volume2, VolumeX, Sparkles, Plus, Flame } from 'lucide-react';
+import { Volume2, VolumeX, Plus } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import DepositModal from './DepositModal';
 import { cr } from '../../utils/credits';
+import { useNavItems } from './BottomNavbar';
 
+/** Top bar: brand, the main menu (larger screens), balance, sound and your avatar. */
 const Header: React.FC = () => {
-  const { user, soundEnabled, toggleSound, setCurrentTab } = useApp();
+  const { user, soundEnabled, toggleSound, currentTab, setCurrentTab } = useApp();
   const [isDepositOpen, setIsDepositOpen] = useState(false);
+  const items = useNavItems();
 
   return (
     <>
-      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/80 px-4 py-3 transition-all">
-        <div className="max-w-4xl mx-auto flex items-center justify-between">
-          {/* Logo & Brand */}
-          <div 
-            onClick={() => setCurrentTab('home')}
-            className="flex items-center gap-2 cursor-pointer group"
-          >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 via-indigo-600 to-purple-600 p-0.5 shadow-lg shadow-emerald-950/40 group-hover:scale-105 transition-transform">
-              <div className="w-full h-full bg-zinc-950 rounded-[10px] flex items-center justify-center">
-                <Sparkles className="w-5 h-5 text-emerald-400 group-hover:rotate-12 transition-transform" />
-              </div>
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold tracking-tight text-xl text-white font-display">
-                  BET<span className="text-emerald-400">CHA</span>
-                </span>
-                <span className="px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-md">
-                  P2P Arcade
-                </span>
-              </div>
-              <p className="text-[10px] text-zinc-400 font-medium">5% Spread • Escrow Wagers</p>
-            </div>
-          </div>
+      <header className="sticky top-0 z-40 bg-zinc-950/80 backdrop-blur-xl border-b border-white/[0.06] pt-[env(safe-area-inset-top)]">
+        <div className="max-w-6xl mx-auto h-14 md:h-16 px-4 flex items-center gap-3">
+          {/* Brand */}
+          <button type="button" onClick={() => setCurrentTab('home')} className="flex items-center gap-2 shrink-0" aria-label="Betcha home">
+            <img src="/logo.svg" alt="" className="w-8 h-8 rounded-lg" />
+            <span className="font-display font-extrabold text-lg tracking-tight text-white hidden min-[380px]:inline">
+              BET<span className="text-emerald-400">CHA</span>
+            </span>
+          </button>
 
-          {/* Right Action Bar */}
-          <div className="flex items-center gap-2">
-            {/* Wallet Balance Pill */}
-            <div 
-              onClick={() => setCurrentTab('wallet')}
-              className="flex items-center gap-2 bg-zinc-900 hover:bg-zinc-850 border border-zinc-800 hover:border-emerald-500/40 px-3 py-1.5 rounded-full cursor-pointer transition-all shadow-sm group"
-            >
-              <div className="w-6 h-6 rounded-full bg-emerald-500/15 flex items-center justify-center text-emerald-400">
-                <Wallet className="w-3.5 h-3.5" />
-              </div>
-              <div className="flex flex-col items-start leading-none">
-                <span className="text-[10px] text-zinc-400 uppercase font-semibold">Balance</span>
-                <span className="text-xs font-bold text-emerald-400 font-mono">
-                  {cr(user.balance)}
-                </span>
-              </div>
-              
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setIsDepositOpen(true);
-                }}
-                className="ml-1 p-1 rounded-full bg-emerald-500 text-zinc-950 hover:bg-emerald-400 transition-colors shadow-sm"
-                title="Quick Deposit"
-              >
-                <Plus className="w-3 h-3 stroke-[3]" />
-              </button>
-            </div>
+          {/* Main menu (larger screens) */}
+          <nav aria-label="Main" className="hidden md:flex items-center gap-1 ml-6 h-full">
+            {items.map(({ id, label, badge }) => {
+              const active = currentTab === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setCurrentTab(id)}
+                  aria-current={active ? 'page' : undefined}
+                  className={`relative h-full px-4 text-sm font-bold tracking-wide flex items-center gap-2 transition-colors ${
+                    active ? 'text-white' : 'text-zinc-400 hover:text-white'
+                  }`}
+                >
+                  {label}
+                  {badge !== undefined && (
+                    <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-400 text-zinc-950 text-[10px] font-extrabold flex items-center justify-center">
+                      {badge}
+                    </span>
+                  )}
+                  {active && <span className="absolute bottom-0 left-3 right-3 h-[3px] rounded-t-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />}
+                </button>
+              );
+            })}
+          </nav>
 
-            {/* Sound Toggle */}
+          <div className="flex-1" />
+
+          {/* Balance: tap for free credits */}
+          <div className="flex items-center h-9 rounded-full bg-white/[0.06] border border-white/[0.08] pl-3 pr-1 gap-2 shrink-0">
+            <button type="button" onClick={() => setCurrentTab('wallet')} className="font-mono font-bold text-sm text-white tabular-nums whitespace-nowrap">
+              {cr(user.balance)}
+            </button>
             <button
               type="button"
-              onClick={toggleSound}
-              className="p-2 text-zinc-400 hover:text-white bg-zinc-900 border border-zinc-800 rounded-full hover:border-zinc-700 transition-all"
-              title={soundEnabled ? 'Mute Sound' : 'Unmute Sound'}
+              onClick={() => setIsDepositOpen(true)}
+              aria-label="Get free credits"
+              className="w-7 h-7 rounded-full bg-emerald-400 hover:bg-emerald-300 text-zinc-950 flex items-center justify-center"
             >
-              {soundEnabled ? (
-                <Volume2 className="w-4 h-4 text-emerald-400" />
-              ) : (
-                <VolumeX className="w-4 h-4 text-zinc-500" />
-              )}
+              <Plus className="w-4 h-4 stroke-[3]" />
             </button>
           </div>
+
+          <button
+            type="button"
+            onClick={toggleSound}
+            aria-label={soundEnabled ? 'Mute sound' : 'Turn sound on'}
+            className="w-9 h-9 shrink-0 rounded-full bg-white/[0.06] hover:bg-white/10 text-zinc-300 hover:text-white flex items-center justify-center"
+          >
+            {soundEnabled ? <Volume2 className="w-[18px] h-[18px]" /> : <VolumeX className="w-[18px] h-[18px] text-zinc-500" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setCurrentTab('profile')}
+            aria-label="Your profile"
+            className={`w-9 h-9 shrink-0 rounded-full overflow-hidden ring-2 ${currentTab === 'profile' ? 'ring-emerald-400' : 'ring-white/10 hover:ring-white/30'}`}
+          >
+            <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+          </button>
         </div>
       </header>
 
-      {/* Deposit Modal */}
       <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
     </>
   );

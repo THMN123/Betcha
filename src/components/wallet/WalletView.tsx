@@ -1,171 +1,121 @@
-import React, { useState, useEffect } from 'react';
-import {
-  Wallet,
-  ArrowUpRight,
-  ArrowDownLeft,
-  ShieldCheck,
-  DollarSign,
-  Plus,
-  Clock,
-  CheckCircle2,
-  Lock,
-  Filter,
-  Sparkles,
-  TrendingUp,
-} from 'lucide-react';
+import React, { useState } from 'react';
+import { ArrowUpRight, ArrowDownLeft, ShieldCheck, Plus, Lock, Sparkles, TrendingUp, Percent } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import DepositModal from '../common/DepositModal';
 import WithdrawModal from '../common/WithdrawModal';
 import { TransactionType } from '../../types';
-import MorphingHeading from '../common/MorphingHeading';
-import { WalletSkeleton } from '../common/SkeletonLoader';
 import { cr } from '../../utils/credits';
 
+const FILTERS: { id: TransactionType | 'all'; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'buy_in', label: 'Buy-ins' },
+  { id: 'payout_win', label: 'Winnings' },
+  { id: 'platform_fee', label: 'Fees' },
+  { id: 'deposit', label: 'Credits' },
+];
+
+const TX_STYLE: Record<string, { cls: string; Icon: React.FC<{ className?: string }> }> = {
+  payout_win: { cls: 'bg-emerald-400/15 text-emerald-300', Icon: Sparkles },
+  deposit: { cls: 'bg-indigo-400/15 text-indigo-300', Icon: ArrowDownLeft },
+  platform_fee: { cls: 'bg-amber-400/15 text-amber-300', Icon: Percent },
+};
+
+/** Wallet: balance up top, then activity and money held in matches. */
 const WalletView: React.FC = () => {
   const { user, transactions, escrowLedger } = useApp();
-
-  const [activeTab, setActiveTab] = useState<'history' | 'escrow'>('history');
+  const [tab, setTab] = useState<'history' | 'escrow'>('history');
   const [filterType, setFilterType] = useState<TransactionType | 'all'>('all');
-
   const [isDepositOpen, setIsDepositOpen] = useState(false);
   const [isWithdrawOpen, setIsWithdrawOpen] = useState(false);
 
-
-
-  const filteredTx = transactions.filter((tx) => {
-    if (filterType === 'all') return true;
-    return tx.type === filterType;
-  });
-
-  const activeEscrowItems = escrowLedger.filter((e) => e.status === 'active_escrow');
+  const filteredTx = transactions.filter((tx) => filterType === 'all' || tx.type === filterType);
 
   return (
-    <div className="space-y-6 pb-24 animate-in fade-in">
-      {/* Balance Card */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-zinc-900 via-zinc-950 to-emerald-950/60 border border-emerald-500/30 p-6 shadow-2xl">
-        <div className="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
-          <Wallet className="w-48 h-48 text-emerald-400" />
-        </div>
+    <div className="space-y-6">
+      <h1 className="text-3xl font-extrabold text-white tracking-tight">Wallet</h1>
 
-        <div className="relative z-10">
-          <div className="flex items-center justify-between mb-4">
-            <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1 rounded-full uppercase tracking-wider">
-              Betcha Escrow Vault
-            </span>
+      {/* Balance */}
+      <section className="relative overflow-hidden rounded-3xl border border-white/[0.08] bg-gradient-to-br from-emerald-500/20 via-zinc-900 to-indigo-500/15 p-5 sm:p-7">
+        <div className="absolute -right-16 -top-16 w-64 h-64 rounded-full bg-emerald-400/20 blur-3xl pointer-events-none" />
+        <div className="relative">
+          <div className="text-sm font-semibold text-zinc-300">Available balance</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-5xl font-extrabold text-white tracking-tight tabular-nums">{user.balance.toFixed(2)}</span>
+            <span className="text-lg font-bold text-emerald-300">cr</span>
+          </div>
+          <div className="text-xs text-zinc-400 mt-1">Play credits · no cash value</div>
 
-            <div className="flex items-center gap-1 text-[11px] text-zinc-400 font-mono">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-              <span>5% Spread Audited</span>
+          <div className="mt-5 grid grid-cols-2 gap-3">
+            <div className="rounded-2xl bg-black/25 border border-white/[0.06] p-3">
+              <div className="text-xs text-zinc-400 flex items-center gap-1.5">
+                <Lock className="w-3.5 h-3.5 text-amber-300" /> Held in matches
+              </div>
+              <div className="text-lg font-extrabold text-white tabular-nums mt-0.5">{cr(user.escrowLocked)}</div>
+            </div>
+            <div className="rounded-2xl bg-black/25 border border-white/[0.06] p-3">
+              <div className="text-xs text-zinc-400 flex items-center gap-1.5">
+                <TrendingUp className="w-3.5 h-3.5 text-emerald-300" /> Won all-time
+              </div>
+              <div className="text-lg font-extrabold text-white tabular-nums mt-0.5">{cr(user.totalEarnings)}</div>
             </div>
           </div>
 
-          <div className="mb-6">
-            <span className="block text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-1">
-              Available Arcade Balance
-            </span>
-            <div className="flex items-baseline gap-2">
-              <MorphingHeading as="span" glowColor="emerald" className="text-3xl sm:text-4xl font-black text-white font-mono tracking-tight">
-                {cr(user.balance)}
-              </MorphingHeading>
-              <span className="text-xs font-semibold text-emerald-400 font-mono">play credits</span>
-            </div>
-          </div>
-
-          {/* Locked Funds Banner */}
-          <div className="grid grid-cols-2 gap-3 mb-6 p-3.5 rounded-2xl bg-zinc-950/80 border border-zinc-800/80 font-mono">
-            <div>
-              <span className="block text-[10px] text-amber-400 font-semibold uppercase flex items-center gap-1">
-                <Lock className="w-3 h-3" />
-                <span>In-Escrow Locked</span>
-              </span>
-              <span className="text-base font-bold text-white">{cr(user.escrowLocked)}</span>
-            </div>
-
-            <div>
-              <span className="block text-[10px] text-emerald-400 font-semibold uppercase flex items-center gap-1">
-                <TrendingUp className="w-3 h-3" />
-                <span>Total Lifetime Winnings</span>
-              </span>
-              <span className="text-base font-bold text-white">{cr(user.totalEarnings)}</span>
-            </div>
-          </div>
-
-          {/* Quick Action Buttons */}
-          <div className="grid grid-cols-2 gap-3">
+          <div className="mt-5 grid grid-cols-2 gap-3">
             <button
               type="button"
               onClick={() => setIsDepositOpen(true)}
-              className="py-3 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-extrabold text-xs sm:text-sm shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
+              className="h-12 rounded-full bg-white hover:bg-zinc-200 text-zinc-950 font-extrabold text-sm flex items-center justify-center gap-2"
             >
-              <Plus className="w-4 h-4 stroke-[3]" />
-              <span>Free Credits</span>
+              <Plus className="w-4 h-4 stroke-[3]" /> Free credits
             </button>
-
             <button
               type="button"
               onClick={() => setIsWithdrawOpen(true)}
-              className="py-3 rounded-2xl bg-zinc-900 hover:bg-zinc-850 border border-zinc-700 text-white font-bold text-xs sm:text-sm shadow-md flex items-center justify-center gap-2 transition-all"
+              className="h-12 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 text-white font-bold text-sm flex items-center justify-center gap-2"
             >
-              <ArrowUpRight className="w-4 h-4 text-emerald-400" />
-              <span>Cash Out?</span>
+              <ArrowUpRight className="w-4 h-4" /> Cash out
             </button>
           </div>
         </div>
+      </section>
+
+      {/* Tabs */}
+      <div role="tablist" className="flex gap-1 border-b border-white/[0.07]">
+        {[
+          { id: 'history' as const, label: 'Activity', count: transactions.length },
+          { id: 'escrow' as const, label: 'Held in matches', count: escrowLedger.filter((e) => e.status === 'active_escrow').length },
+        ].map((t) => {
+          const active = t.id === tab;
+          return (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={active}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`relative px-3 sm:px-4 h-11 text-sm font-bold flex items-center gap-2 ${active ? 'text-white' : 'text-zinc-500 hover:text-zinc-200'}`}
+            >
+              {t.label}
+              <span className={`min-w-[20px] h-5 px-1.5 rounded-full text-[11px] flex items-center justify-center ${active ? 'bg-white text-zinc-950' : 'bg-white/10 text-zinc-400'}`}>
+                {t.count}
+              </span>
+              {active && <span className="absolute bottom-0 left-2 right-2 h-[3px] rounded-t-full bg-emerald-400" />}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Tabs Toggle: Transactions vs Escrow Ledger */}
-      <div className="flex items-center gap-2 border-b border-zinc-800 pb-2">
-        <button
-          type="button"
-          onClick={() => setActiveTab('history')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm transition-all ${
-            activeTab === 'history'
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-              : 'text-zinc-400 hover:text-white'
-          }`}
-        >
-          Transaction History ({transactions.length})
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('escrow')}
-          className={`px-4 py-2 rounded-xl font-bold text-xs sm:text-sm transition-all flex items-center gap-1.5 ${
-            activeTab === 'escrow'
-              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-              : 'text-zinc-400 hover:text-white'
-          }`}
-        >
-          <Lock className="w-3.5 h-3.5" />
-          <span>Escrow Ledger ({escrowLedger.length})</span>
-        </button>
-      </div>
-
-      {/* View 1: Transaction History */}
-      {activeTab === 'history' && (
-        <div className="space-y-4">
-          {/* Filters */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
-            <span className="text-zinc-500 font-semibold uppercase text-[10px] mr-1 flex items-center gap-1">
-              <Filter className="w-3 h-3" />
-              Filter:
-            </span>
-
-            {[
-              { id: 'all', label: 'All' },
-              { id: 'buy_in', label: 'Buy-Ins' },
-              { id: 'payout_win', label: 'Winnings' },
-              { id: 'platform_fee', label: '5% Platform Fees' },
-              { id: 'deposit', label: 'Deposits' },
-            ].map((f) => (
+      {tab === 'history' && (
+        <div className="space-y-3">
+          <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4">
+            {FILTERS.map((f) => (
               <button
                 key={f.id}
                 type="button"
-                onClick={() => setFilterType(f.id as TransactionType | 'all')}
-                className={`px-3 py-1.5 rounded-lg font-mono font-medium whitespace-nowrap transition-all ${
-                  filterType === f.id
-                    ? 'bg-zinc-800 text-white border border-zinc-700 font-bold'
-                    : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border border-zinc-850'
+                onClick={() => setFilterType(f.id)}
+                aria-pressed={filterType === f.id}
+                className={`h-9 px-4 rounded-full text-sm font-semibold whitespace-nowrap border ${
+                  filterType === f.id ? 'bg-white text-zinc-950 border-white' : 'bg-white/[0.04] text-zinc-300 border-white/[0.08] hover:bg-white/[0.08]'
                 }`}
               >
                 {f.label}
@@ -173,119 +123,76 @@ const WalletView: React.FC = () => {
             ))}
           </div>
 
-          {/* Transactions List */}
-          <div className="space-y-2">
-            {filteredTx.map((tx) => {
-              const isPositive = tx.amount > 0;
-              return (
-                <div
-                  key={tx.id}
-                  className="flex items-center justify-between p-3.5 rounded-2xl bg-zinc-900 border border-zinc-800/80 shadow-md hover:border-zinc-700 transition-all"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
-                        tx.type === 'payout_win'
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                          : tx.type === 'deposit'
-                          ? 'bg-indigo-500/15 text-indigo-400 border border-indigo-500/30'
-                          : tx.type === 'platform_fee'
-                          ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                          : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                      }`}
-                    >
-                      {tx.type === 'payout_win' ? (
-                        <Sparkles className="w-4 h-4" />
-                      ) : tx.type === 'deposit' ? (
-                        <ArrowDownLeft className="w-4 h-4" />
-                      ) : (
-                        <ArrowUpRight className="w-4 h-4" />
-                      )}
-                    </div>
-
-                    <div>
-                      <span className="text-xs font-bold text-white block leading-tight">
-                        {tx.description}
-                      </span>
-                      <span className="text-[10px] text-zinc-400 font-mono mt-0.5 block">
-                        {tx.timestamp} • Status: {tx.status}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="text-right">
-                    <span
-                      className={`font-mono font-bold text-sm ${
-                        isPositive ? 'text-emerald-400' : 'text-zinc-300'
-                      }`}
-                    >
-                      {isPositive ? `+${cr(tx.amount)}` : `-${cr(Math.abs(tx.amount))}`}
+          {filteredTx.length === 0 ? (
+            <p className="text-sm text-zinc-500 py-6 text-center">Nothing here yet.</p>
+          ) : (
+            <ul className="rounded-2xl bg-zinc-900/70 border border-white/[0.07] divide-y divide-white/[0.05] overflow-hidden">
+              {filteredTx.map((tx) => {
+                const positive = tx.amount > 0;
+                const style = TX_STYLE[tx.type] ?? { cls: 'bg-rose-400/15 text-rose-300', Icon: ArrowUpRight };
+                return (
+                  <li key={tx.id} className="flex items-center gap-3 px-4 py-3">
+                    <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${style.cls}`}>
+                      <style.Icon className="w-[18px] h-[18px]" />
                     </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-semibold text-white truncate">{tx.description}</div>
+                      <div className="text-xs text-zinc-500">
+                        {tx.timestamp}
+                        {tx.status !== 'completed' && ` · ${tx.status}`}
+                      </div>
+                    </div>
+                    <div className={`text-sm font-extrabold tabular-nums ${positive ? 'text-emerald-300' : 'text-zinc-300'}`}>
+                      {positive ? `+${cr(tx.amount)}` : `−${cr(Math.abs(tx.amount))}`}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
 
-      {/* View 2: Escrow Ledger */}
-      {activeTab === 'escrow' && (
+      {tab === 'escrow' && (
         <div className="space-y-3">
-          <div className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl">
-            <h3 className="text-xs font-bold text-white uppercase tracking-wider mb-1 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>How Betcha P2P Escrow Works</span>
-            </h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              When a match is created, player buy-ins are immediately locked in the smart escrow ledger. Once scores are submitted, the platform automatically deducts a 5% spread fee and releases the net pot instantly to the winner!
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            {escrowLedger.map((esc) => (
-              <div
-                key={esc.id}
-                className="p-4 rounded-2xl bg-zinc-950 border border-zinc-800 flex flex-col gap-2 font-mono"
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-white">
-                    Match #{esc.matchId} ({esc.gameTitle})
-                  </span>
-                  <span
-                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      esc.status === 'active_escrow'
-                        ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                        : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                    }`}
-                  >
-                    {esc.status === 'active_escrow' ? 'LOCKED IN ESCROW' : 'SETTLED & RELEASED'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-2 text-xs text-zinc-400 pt-2 border-t border-zinc-850">
-                  <div>
-                    <span className="block text-[10px] text-zinc-500 uppercase">Gross Locked</span>
-                    <span className="font-bold text-white">{cr(esc.totalLocked)}</span>
-                  </div>
-                  <div>
-                    <span className="block text-[10px] text-amber-400 uppercase">5% Spread Fee</span>
-                    <span className="font-bold text-amber-400">{cr(esc.platformFeeHeld)}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-[10px] text-emerald-400 uppercase">Net Release Pot</span>
-                    <span className="font-bold text-emerald-400">
-                      {cr((esc.totalLocked - esc.platformFeeHeld))}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          <p className="text-sm text-zinc-400 flex gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-300 shrink-0 mt-0.5" />
+            Buy-ins are held safely until a match ends. Then 5% goes to the platform and the rest goes to the winner.
+          </p>
+          {escrowLedger.length === 0 ? (
+            <p className="text-sm text-zinc-500 py-6 text-center">No credits held right now.</p>
+          ) : (
+            <ul className="rounded-2xl bg-zinc-900/70 border border-white/[0.07] divide-y divide-white/[0.05] overflow-hidden">
+              {escrowLedger.map((esc) => {
+                const held = esc.status === 'active_escrow';
+                return (
+                  <li key={esc.id} className="px-4 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-white truncate">{esc.gameTitle}</div>
+                        <div className="text-xs text-zinc-500">Match #{esc.matchId}</div>
+                      </div>
+                      <span
+                        className={`px-2 py-1 rounded-md text-[11px] font-bold uppercase tracking-wide border ${
+                          held ? 'bg-amber-400/15 text-amber-200 border-amber-300/30' : 'bg-white/10 text-zinc-300 border-white/10'
+                        }`}
+                      >
+                        {held ? 'Held' : 'Released'}
+                      </span>
+                    </div>
+                    <div className="mt-2 flex justify-between text-xs text-zinc-400 tabular-nums">
+                      <span>Pot {cr(esc.totalLocked)}</span>
+                      <span>Fee {cr(esc.platformFeeHeld)}</span>
+                      <span className="text-emerald-300 font-bold">Prize {cr(esc.totalLocked - esc.platformFeeHeld)}</span>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </div>
       )}
 
-      {/* Deposit & Withdraw Modals */}
       <DepositModal isOpen={isDepositOpen} onClose={() => setIsDepositOpen(false)} />
       <WithdrawModal isOpen={isWithdrawOpen} onClose={() => setIsWithdrawOpen(false)} />
     </div>

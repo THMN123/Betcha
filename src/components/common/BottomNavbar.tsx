@@ -1,74 +1,72 @@
 import React from 'react';
-import { Gamepad2, Swords, Wallet, User } from 'lucide-react';
+import { House, Swords, Wallet, UserRound } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { NavigationTab } from '../../types';
-import { cr } from '../../utils/credits';
 
+export interface NavItem {
+  id: NavigationTab;
+  label: string;
+  Icon: React.FC<{ className?: string }>;
+  badge?: number;
+}
+
+/** The app's sections, shared by the top menu (larger screens) and the bottom tab bar (phones). */
+export function useNavItems(): NavItem[] {
+  const { rooms } = useApp();
+  // Matches that need you: lobbies you're in and matches being played.
+  const live = rooms.filter(
+    (r) => (r.status === 'waiting' || r.status === 'in_progress') && r.players.some((p) => p.isCurrentUser)
+  ).length;
+  return [
+    { id: 'home', label: 'Home', Icon: House },
+    { id: 'lobbies', label: 'Matches', Icon: Swords, badge: live || undefined },
+    { id: 'wallet', label: 'Wallet', Icon: Wallet },
+    { id: 'profile', label: 'Profile', Icon: UserRound },
+  ];
+}
+
+/** Phone tab bar, docked to the bottom edge (content is padded so nothing hides behind it). */
 const BottomNavbar: React.FC = () => {
-  const { currentTab, setCurrentTab, user, escrowLedger, activePlayingMatch, practiceGameId } = useApp();
+  const { currentTab, setCurrentTab, activePlayingMatch, practiceGameId } = useApp();
+  const items = useNavItems();
 
-  // Hide bottom navbar completely when user is in active game arena mode to optimize full screen gameplay
+  // Full screen while playing.
   if (activePlayingMatch || practiceGameId) return null;
 
-  const activeEscrowCount = escrowLedger.filter((e) => e.status === 'active_escrow').length;
-
-  const navItems: { id: NavigationTab; label: string; icon: React.ReactNode; badge?: number | string }[] = [
-    {
-      id: 'home',
-      label: 'Home',
-      icon: <Gamepad2 className="w-4 h-4 sm:w-5 sm:h-5" />,
-    },
-    {
-      id: 'lobbies',
-      label: 'Lobbies',
-      icon: <Swords className="w-4 h-4 sm:w-5 sm:h-5" />,
-      badge: activeEscrowCount > 0 ? activeEscrowCount : undefined,
-    },
-    {
-      id: 'wallet',
-      label: 'Wallet',
-      icon: <Wallet className="w-4 h-4 sm:w-5 sm:h-5" />,
-      badge: user.escrowLocked > 0 ? cr(Math.round(user.escrowLocked)) : undefined,
-    },
-    {
-      id: 'profile',
-      label: 'Profile',
-      icon: <User className="w-4 h-4 sm:w-5 sm:h-5" />,
-    },
-  ];
-
   return (
-    <div className="fixed bottom-3 sm:bottom-5 left-1/2 -translate-x-1/2 z-40 w-auto max-w-[calc(100vw-1.5rem)] pointer-events-none pb-[env(safe-area-inset-bottom)]">
-      <nav className="pointer-events-auto bg-zinc-900/95 backdrop-blur-2xl border border-zinc-800/90 shadow-2xl shadow-black/90 rounded-full px-2 sm:px-3 py-1.5 sm:py-2 flex items-center justify-center gap-1 sm:gap-2 transition-all">
-        {navItems.map((item) => {
-          const isActive = currentTab === item.id;
+    <nav
+      aria-label="Main"
+      className="md:hidden fixed bottom-0 inset-x-0 z-40 bg-zinc-950/92 backdrop-blur-xl border-t border-white/[0.07] pb-[env(safe-area-inset-bottom)]"
+    >
+      <div className="grid grid-cols-4 h-16">
+        {items.map(({ id, label, Icon, badge }) => {
+          const active = currentTab === id;
           return (
             <button
-              key={item.id}
+              key={id}
               type="button"
-              onClick={() => setCurrentTab(item.id)}
-              className={`relative flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-full font-semibold text-[11px] sm:text-xs transition-all duration-200 whitespace-nowrap ${
-                isActive
-                  ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-zinc-950 font-bold shadow-lg shadow-emerald-500/25 scale-[1.02]'
-                  : 'text-zinc-400 hover:text-white hover:bg-zinc-800/60'
+              onClick={() => setCurrentTab(id)}
+              aria-current={active ? 'page' : undefined}
+              className={`relative flex flex-col items-center justify-center gap-1 text-[11px] font-semibold ${
+                active ? 'text-white' : 'text-zinc-500'
               }`}
             >
-              <span className="relative flex items-center justify-center">
-                {item.icon}
-                {item.badge !== undefined && !isActive && (
-                  <span className="absolute -top-1.5 -right-2 px-1 py-0.2 text-[8px] sm:text-[9px] font-bold font-mono bg-indigo-500 text-white rounded-full min-w-[13px] text-center border border-zinc-950">
-                    {item.badge}
+              {active && <span className="absolute top-0 h-[3px] w-10 rounded-b-full bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,0.8)]" />}
+              <span className="relative">
+                <Icon className={`w-[22px] h-[22px] ${active ? 'text-white' : ''}`} />
+                {badge !== undefined && (
+                  <span className="absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-400 text-zinc-950 text-[10px] font-extrabold flex items-center justify-center ring-2 ring-zinc-950">
+                    {badge}
                   </span>
                 )}
               </span>
-              <span className="tracking-tight">{item.label}</span>
+              {label}
             </button>
           );
         })}
-      </nav>
-    </div>
+      </div>
+    </nav>
   );
 };
 
 export default BottomNavbar;
-

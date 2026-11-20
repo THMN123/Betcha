@@ -15,6 +15,21 @@
   --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-display: 'Orbitron', 'Plus Jakarta Sans', sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
+
+  /* Console palette: the whole app uses Tailwind's zinc scale, so redefining it here re-themes
+     every screen to a cool, deep blue-black (like a game console's dashboard) in one place. */
+  --color-zinc-50: #f5f7fb;
+  --color-zinc-100: #eceff6;
+  --color-zinc-200: #d9deea;
+  --color-zinc-300: #b9c1d3;
+  --color-zinc-400: #8d97ae;
+  --color-zinc-500: #646e86;
+  --color-zinc-600: #434c62;
+  --color-zinc-700: #2c3447;
+  --color-zinc-800: #1d2333;
+  --color-zinc-850: #161b29;
+  --color-zinc-900: #11151f;
+  --color-zinc-950: #080a10;
 }
 
 html, body {
@@ -29,7 +44,11 @@ html, body {
 
 body {
   font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  background-color: #09090b;
+  background-color: #080a10;
+  background-image:
+    radial-gradient(1200px 600px at 15% -10%, rgba(34, 211, 160, 0.10), transparent 60%),
+    radial-gradient(900px 500px at 100% 0%, rgba(99, 102, 241, 0.12), transparent 60%);
+  background-attachment: fixed;
   color: #f4f4f5;
   -webkit-font-smoothing: antialiased;
   min-height: 100dvh;
@@ -83,7 +102,39 @@ body {
 .animate-in.zoom-in-95 { animation-name: bx-zoom-in; animation-duration: 200ms; animation-timing-function: cubic-bezier(0.2, 0.9, 0.3, 1); }
 .animate-in.slide-in-from-bottom { animation-name: bx-slide-up; animation-duration: 220ms; }
 .animate-countdown { animation: bx-countdown 1s cubic-bezier(0.2, 0.9, 0.3, 1) both; }
-.tab-enter { animation: bx-slide-up 200ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+/* Opacity only: a transform here would trap every position:fixed popup inside the tab
+   (that's why the lobby card used to open off-screen on phones). */
+.tab-enter { animation: bx-fade-in 220ms ease-out both; }
+
+@keyframes bx-sheet-up { from { transform: translateY(100%) } to { transform: translateY(0) } }
+.sheet-up { animation: bx-sheet-up 260ms cubic-bezier(0.2, 0.9, 0.3, 1) both; }
+
+@layer components {
+/* Horizontal "shelf" of tiles, like a console home screen. */
+.shelf {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding-inline: 1rem;
+  padding-inline: 1rem;
+  margin-inline: -1rem;
+  padding-bottom: 0.5rem;
+  scrollbar-width: none;
+}
+.shelf::-webkit-scrollbar { display: none; }
+.shelf > * { scroll-snap-align: start; flex-shrink: 0; }
+
+/* Focus/hover ring for selectable tiles (keyboard and pointer). */
+.tile-focus { transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease; }
+.tile-focus:hover { transform: translateY(-2px); }
+.tile-focus:focus-visible, .tile-selected {
+  outline: none;
+  box-shadow: 0 0 0 2px #080a10, 0 0 0 4px rgba(255, 255, 255, 0.9), 0 18px 40px -12px rgba(0, 0, 0, 0.8);
+}
+}
+
+:focus-visible { outline: 2px solid rgba(255, 255, 255, 0.85); outline-offset: 2px; }
 
 .no-scrollbar { scrollbar-width: none; }
 .no-scrollbar::-webkit-scrollbar { display: none; }
