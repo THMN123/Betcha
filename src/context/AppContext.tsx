@@ -72,7 +72,8 @@ interface AppContextType {
   /** Sends a finished run's input log for server verification. Retries automatically if it fails. */
   submitRun: (roomId: string, inputs: InputEvent[]) => Promise<SubmitOutcome>;
   pendingSubmissions: string[];
-  settleMatch: (roomId: string) => Promise<void>;
+  requestRefund: (roomId: string, reason: string) => Promise<boolean>;
+  ackRefund: (roomId: string) => Promise<void>;
 
   claimFreeCredits: () => Promise<boolean>;
   canClaimCreditsAt: Date | null;
@@ -332,17 +333,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .limit(60);
 
     const ids = (matchRows ?? []).map((m) => m.id);
-    const [{ data: playerRows }, { data: runRows }] = ids.length
+    const [{ data: playerRows }, { data: runRows }, { data: refundRows }, { data: ackRows }] = ids.length
       ? await Promise.all([
           supabase.from('match_players').select('*').in('match_id', ids),
           supabase.from('runs').select('match_id, status').eq('player_id', myId).in('match_id', ids),
+          supabase.from('refund_requests').select('*').in('match_id', ids),
+          supabase.from('refund_acks').select('match_id, player_id').in('match_id', ids),
         ])
-      : [{ data: [] as any[] }, { data: [] as any[] }];
+      : [{ data: [] as any[] }, { data: [] as any[] }, { data: [] as any[] }, { data: [] as any[] }];
     const myRuns = new Map((runRows ?? []).map((r: any) => [r.match_id, r.status]));
+    const refunds = new Map(
+      (refundRows ?? []).map((r: any) => [
+        r.match_id,
+        {
+          requestedBy: r.requested_by,
+          reason: r.reason,
+          status: r.status,
+          createdAt: r.created_at,
+          adminNote: r.admin_note ?? undefined,
+          ackedBy: (ackRows ?? []).filter((a: any) => a.match_id === r.match_id).map((a: any) => a.player_id),
+        },
+      ])
+    );
 
     setRooms(
       (matchRows ?? [])
-        .map((m) => ({ ...mapRoom(m, playerRows ?? [], myId), myRun: myRuns.get(m.id) }))
+        .map((m) => ({ ...mapRoom(m, playerRows ?? [], myId), myRun: myRuns.get(m.id), refund: refunds.get(m.id) }))
         // Hide other people's cancelled lobbies; keep my own history.
         .filter((r) => r.status !== 'cancelled' || r.players.some((p) => p.isCurrentUser))
     );
@@ -412,6 +428,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .channel(`betcha-live-${myId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'matches' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'match_players' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'refund_requests' }, scheduleRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'refund_acks' }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${myId}` }, scheduleRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'account_balances', filter: `account=eq.user:${myId}` }, scheduleRefresh)
       .subscribe();
@@ -663,10 +681,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearInterval(t);
   }, [myId, rooms, submitRun]);
 
-  const settleMatch = async (roomId: string) => {
+  // A match only ends on normal terms. If it can't finish, a player asks for a refund (with a reason);
+  // every player acknowledges it, then an admin approves or rejects it.
+  const requestRefund = async (roomId: string, reason: string): Promise<boolean> => {
+    if (!supabase) return false;
+    const { error } = await supabase.rpc('request_refund', { p_match_id: roomId, p_reason: reason });
+    if (error) {
+      fail(error);
+      return false;
+    }
+    showToast('Refund requested. Every player has to acknowledge it, then an admin reviews it.', 'success');
+    await refresh();
+    return true;
+  };
+
+  const ackRefund = async (roomId: string) => {
     if (!supabase) return;
-    const { error } = await supabase.rpc('settle_match', { p_match_id: roomId });
+    const { error } = await supabase.rpc('ack_refund', { p_match_id: roomId });
     if (error) return fail(error);
+    showToast('Acknowledged. An admin will review the refund.', 'success');
     await refresh();
   };
 
@@ -809,7 +842,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         beginRun,
         submitRun,
         pendingSubmissions: Object.keys(pendingRuns),
-        settleMatch,
+        requestRefund,
+        ackRefund,
         claimFreeCredits,
         canClaimCreditsAt,
         soundEnabled,

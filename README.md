@@ -64,6 +64,9 @@ Run the game tests with `cd supabase/functions && deno test _shared/games/`.
    Then run `004_server_time.sql`, `005_admin_void.sql` and `006_resumable_runs.sql` (each is safe to re-run).
    006 makes starting a run safe to retry, so a lost reply or a page reload can't cost a player their run.
    Apps from before 006 keep working after it is applied.
+   Then run `007_refund_requests.sql`. From 007 on, a match only ends when every player has finished (win, lose
+   or draw). If it can't finish, a player asks for a refund with a reason, every player acknowledges it, and an admin
+   approves or rejects it in Profile → Admin. Deploy the new app with it: the old app's "End match now" stops working.
 3. **Email sign-up.** Works out of the box. If "Confirm email" is on (Authentication → Sign In / Providers → Email),
    players must click the link in their inbox first; turn it off for instant sign-up while testing.
 4. **Optional: Google sign-in.** Authentication → Sign In / Providers → Google: enable it and add your Google OAuth client.

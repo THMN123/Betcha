@@ -53,6 +53,18 @@ export interface MatchRoom {
   winnerName?: string;
   /** The signed-in player's run in this match, if they have started one. */
   myRun?: 'started' | 'verified' | 'rejected';
+  /** A player's request to refund everyone (needs every player's OK, then an admin's). */
+  refund?: RefundRequest;
+}
+
+export interface RefundRequest {
+  requestedBy: string;
+  reason: string;
+  status: 'pending' | 'approved' | 'rejected';
+  createdAt: string;
+  adminNote?: string;
+  /** Player ids who have acknowledged it. */
+  ackedBy: string[];
 }
 
 export type TransactionType = 'deposit' | 'withdrawal' | 'buy_in' | 'payout_win' | 'platform_fee' | 'refund';

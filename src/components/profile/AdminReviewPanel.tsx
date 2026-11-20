@@ -30,7 +30,8 @@ interface OpenMatch {
   escrow_cents: number;
   created_at: string;
   started_at: string | null;
-  players: { name: string; is_host: boolean; score: number | null; run_status: string | null }[];
+  players: { name: string; is_host: boolean; score: number | null; run_status: string | null; acked_refund?: boolean }[];
+  refund: { status: 'pending' | 'approved' | 'rejected'; reason: string; created_at: string; admin_note: string | null; requested_by: string | null } | null;
 }
 
 const RUN_TEXT: Record<string, string> = { started: 'run started, not submitted', verified: 'verified', rejected: 'rejected' };
@@ -92,17 +93,30 @@ const AdminReviewPanel: React.FC = () => {
     load();
   };
 
-  const voidMatch = async (m: OpenMatch) => {
+  // Refunds only happen when a player asked (with a reason) and every player acknowledged it.
+  const approveRefund = async (m: OpenMatch) => {
     if (!supabase) return;
     const note = window.prompt(
-      `Void "${m.title}" (#${m.id})? Every player gets their buy-in back in full and nobody wins.\n\nReason (kept on record):`
+      `Approve the refund for "${m.title}" (#${m.id})? Every player gets their buy-in back in full and nobody wins.\n\nNote for the players (optional):`
     );
     if (note === null) return;
     setBusy(m.id);
     const { error } = await supabase.rpc('admin_void_match', { p_match_id: m.id, p_note: note || null });
     setBusy(null);
     if (error) showToast(error.message, 'error');
-    else showToast(`Match ${m.id} voided. Everyone was refunded.`, 'success');
+    else showToast(`Match ${m.id} refunded. Everyone got their buy-in back.`, 'success');
+    load();
+  };
+
+  const rejectRefund = async (m: OpenMatch) => {
+    if (!supabase) return;
+    const note = window.prompt(`Reject the refund for "${m.title}" (#${m.id})?\n\nTell the players why (required):`);
+    if (note === null) return;
+    setBusy(m.id);
+    const { error } = await supabase.rpc('admin_reject_refund', { p_match_id: m.id, p_note: note });
+    setBusy(null);
+    if (error) showToast(error.message, 'error');
+    else showToast(`Refund for ${m.id} rejected. The players can see your note.`, 'success');
     load();
   };
 
@@ -210,23 +224,50 @@ const AdminReviewPanel: React.FC = () => {
                   {p.name}
                   {p.is_host ? ' (host)' : ''}: {p.run_status ? RUN_TEXT[p.run_status] ?? p.run_status : m.status === 'waiting' ? 'in lobby' : 'not started'}
                   {p.score !== null && p.score !== undefined ? `, ${p.score} pts` : ''}
+                  {m.refund?.status === 'pending' && (p.acked_refund ? ' · ✓ acknowledged refund' : ' · not acknowledged yet')}
                 </li>
               ))}
             </ul>
-            <button
-              type="button"
-              disabled={busy === m.id}
-              onClick={() => voidMatch(m)}
-              className="w-full py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-50"
-            >
-              <Undo2 className="w-3.5 h-3.5" /> Void match & refund everyone
-            </button>
+            {m.refund?.status === 'pending' ? (() => {
+              const allAcked = (m.players ?? []).every((p) => p.acked_refund);
+              return (
+                <div className="space-y-1.5 pt-1">
+                  <p className="text-[11px] text-indigo-200 break-words">
+                    Refund asked by {m.refund.requested_by ?? 'a player'} {ago(m.refund.created_at)}: "{m.refund.reason}"
+                  </p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      disabled={busy === m.id || !allAcked}
+                      onClick={() => approveRefund(m)}
+                      title={allAcked ? '' : 'Every player has to acknowledge the refund first'}
+                      className="py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-50"
+                    >
+                      <Undo2 className="w-3.5 h-3.5" /> {allAcked ? 'Approve refund' : 'Waiting for players'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy === m.id}
+                      onClick={() => rejectRefund(m)}
+                      className="py-2 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-white text-[11px] font-bold flex items-center justify-center gap-1 disabled:opacity-50"
+                    >
+                      <XCircle className="w-3.5 h-3.5" /> Reject
+                    </button>
+                  </div>
+                </div>
+              );
+            })() : (
+              <p className="text-[10px] text-zinc-500">
+                {m.refund?.status === 'rejected' ? `Refund rejected: "${m.refund.admin_note ?? ''}". ` : ''}
+                No open refund request. Refunds need a player's request and every player's acknowledgement.
+              </p>
+            )}
           </div>
         ))}
       </div>
 
       <p className="text-[10px] text-zinc-500">
-        Release pays out as scored. Disqualify sets the flagged players' scores to 0 and pays the rest. Void refunds every buy-in in full.
+        Release pays out as scored. Disqualify sets the flagged players' scores to 0 and pays the rest. Void refunds every buy-in in full. Running matches are only refunded through a player's request that every player acknowledged.
       </p>
     </div>
   );

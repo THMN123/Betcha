@@ -6,12 +6,15 @@ import { MatchRoom } from '../../types';
 import { cr, inviteUrl, shareInvite } from '../../utils/credits';
 import { canResume, loadCheckpoint } from '../../games/runCheckpoint';
 
-// Must match settle_match() in supabase/migrations/002_verified_runs.sql
+// Last moment a run can still come in (begin window + game time + submit grace, see 002/006).
+// After that, if the match still can't finish, players can ask for a refund.
 const BEGIN_WINDOW_SECONDS = 120;
 const SUBMIT_GRACE_SECONDS = 60;
 
 const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ room, onClose }) => {
-  const { user, joinMatch, leaveMatch, togglePlayerReady, startMatchLobby, enterMatchArena, settleMatch, showToast } = useApp();
+  const { user, joinMatch, leaveMatch, togglePlayerReady, startMatchLobby, enterMatchArena, requestRefund, ackRefund, showToast } = useApp();
+  const [reason, setReason] = useState('');
+  const [askingRefund, setAskingRefund] = useState(false);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -261,27 +264,113 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
           })()}
 
           {room.status === 'in_progress' && me && me.score !== undefined && (
-            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-center text-xs text-zinc-300 space-y-2">
+            <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-center text-xs text-zinc-300 space-y-1">
               <p>
                 Your score is in. Waiting for {pending} more player{pending === 1 ? '' : 's'}.
               </p>
-              {secondsToSettle !== null &&
-                (secondsToSettle > 0 ? (
-                  <p className="text-[11px] text-zinc-500">
-                    If they don't finish, you can end the match in {Math.floor(secondsToSettle / 60)}:{String(secondsToSettle % 60).padStart(2, '0')} (no-shows score 0).
-                  </p>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => run(() => settleMatch(room.id))}
-                    className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs disabled:opacity-50"
-                  >
-                    End match now (unfinished players score 0)
-                  </button>
-                ))}
+              <p className="text-[11px] text-zinc-500">The match ends when everyone has finished: win, lose or draw.</p>
             </div>
           )}
+
+          {/* A match that can't finish: refund only with a reason, every player's OK and an admin's approval. */}
+          {room.status === 'in_progress' && me && (() => {
+            const refund = room.refund;
+            const name = (id: string) => room.players.find((p) => p.id === id)?.name ?? 'A player';
+            if (refund?.status === 'pending') {
+              const waitingFor = room.players.filter((p) => !refund.ackedBy.includes(p.id));
+              const iAcked = refund.ackedBy.includes(user.id);
+              return (
+                <div className="p-3 rounded-xl bg-zinc-950 border border-indigo-500/30 text-xs space-y-2">
+                  <p className="font-bold text-indigo-300">Refund requested by {refund.requestedBy === user.id ? 'you' : name(refund.requestedBy)}</p>
+                  <p className="text-zinc-300 italic break-words">"{refund.reason}"</p>
+                  <ul className="text-[11px] space-y-0.5">
+                    {room.players.map((p) => (
+                      <li key={p.id} className={refund.ackedBy.includes(p.id) ? 'text-emerald-300' : 'text-zinc-500'}>
+                        {refund.ackedBy.includes(p.id) ? '✓' : '…'} {p.isCurrentUser ? 'You' : p.name}
+                        {refund.ackedBy.includes(p.id) ? ' acknowledged' : ' hasn\'t acknowledged yet'}
+                      </li>
+                    ))}
+                  </ul>
+                  {!iAcked ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => run(() => ackRefund(room.id))}
+                      className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs disabled:opacity-50"
+                    >
+                      I acknowledge: refund everyone
+                    </button>
+                  ) : (
+                    <p className="text-[11px] text-zinc-400">
+                      {waitingFor.length
+                        ? `Waiting for ${waitingFor.map((p) => p.name).join(', ')} to acknowledge. Then an admin reviews it.`
+                        : 'Everyone acknowledged. Waiting for an admin to approve the refund.'}
+                    </p>
+                  )}
+                  <p className="text-[10px] text-zinc-500">If approved, every player gets their buy-in back in full and nobody wins.</p>
+                </div>
+              );
+            }
+            // Refunds can be asked for once the time to play has run out and the match still can't finish.
+            if (secondsToSettle === null || secondsToSettle > 0) return null;
+            return (
+              <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-xs space-y-2">
+                {refund?.status === 'rejected' && (
+                  <p className="text-amber-200">
+                    An admin turned down the last refund request{refund.adminNote ? `: "${refund.adminNote}"` : '.'}
+                  </p>
+                )}
+                <p className="text-zinc-300">
+                  Time to play is up but not everyone finished, so this match can't end on its own. If something went wrong,
+                  you can ask for a refund: every player has to acknowledge it, then an admin approves it.
+                </p>
+                {!askingRefund ? (
+                  <button
+                    type="button"
+                    onClick={() => setAskingRefund(true)}
+                    className="w-full py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-bold text-xs"
+                  >
+                    Ask for a refund
+                  </button>
+                ) : (
+                  <>
+                    <textarea
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value.slice(0, 500))}
+                      rows={3}
+                      placeholder="What went wrong? (e.g. my game showed an error and never started)"
+                      className="w-full p-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-100 text-xs placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setAskingRefund(false)}
+                        className="flex-1 py-2.5 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 font-bold text-xs"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || reason.trim().length < 10}
+                        onClick={() =>
+                          run(async () => {
+                            if (await requestRefund(room.id, reason.trim())) {
+                              setAskingRefund(false);
+                              setReason('');
+                            }
+                          })
+                        }
+                        className="flex-1 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs disabled:opacity-50"
+                      >
+                        Send request
+                      </button>
+                    </div>
+                    {reason.trim().length < 10 && <p className="text-[10px] text-zinc-500">Give a reason of at least 10 characters.</p>}
+                  </>
+                )}
+              </div>
+            );
+          })()}
 
           {room.status === 'completed' && (
             <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-center">
@@ -306,7 +395,16 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
 
           {room.status === 'cancelled' && (
             <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-center text-xs text-zinc-400">
-              <ShieldCheck className="w-4 h-4 inline mr-1" /> This match was cancelled and everyone was refunded.
+              <ShieldCheck className="w-4 h-4 inline mr-1" />
+              {room.refund?.status === 'approved' ? (
+                <>
+                  Refund approved by an admin. Everyone got their buy-in back.
+                  <span className="block mt-1 italic text-zinc-500 break-words">Reason: "{room.refund.reason}"</span>
+                  {room.refund.adminNote && <span className="block italic text-zinc-500 break-words">Admin: "{room.refund.adminNote}"</span>}
+                </>
+              ) : (
+                'This match was cancelled and everyone was refunded.'
+              )}
             </div>
           )}
         </div>
