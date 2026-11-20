@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { X, Trophy, Users, ShieldCheck, Flame, RefreshCw, Sparkles, CheckCircle2, Gamepad2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import SnakeGame from '../games/SnakeGame';
@@ -14,9 +14,17 @@ import { cr } from '../../utils/credits';
 import { supabase } from '../../lib/supabaseClient';
 import { useLiveMatch } from '../../hooks/useLiveMatch';
 import LiveScoreboard from './LiveScoreboard';
+import type { InputEvent } from '../../../supabase/functions/_shared/games/index.ts';
+import type { GameId } from '../../types';
+import { canResume, loadCheckpoint, newRunToken, saveCheckpoint, type RunCheckpoint } from '../../games/runCheckpoint';
 
 /** Everyone's run starts this long after the host taps Start (time to get every player into the arena). */
 const SYNC_START_DELAY_MS = 6000;
+
+/** Stable dependency for re-reading the checkpoint when the server-side run state changes. */
+function localRunKey(myRun: string | undefined): string {
+  return myRun ?? 'none';
+}
 
 const PlayArenaModal: React.FC = () => {
   const {
@@ -56,6 +64,29 @@ const PlayArenaModal: React.FC = () => {
       setClockOffset(error || !data ? 0 : new Date(data as string).getTime() + (t1 - t0) / 2 - t1);
     });
   }, [matchId]);
+
+  // This device's saved progress for the current match run (survives re-renders and reloads).
+  const checkpoint = useMemo(
+    () => (matchId && user.id ? loadCheckpoint(matchId, user.id) : null),
+    // Re-read when the run's state changes (started, cut off, submitted).
+    [matchId, user.id, localRunKey(liveRoom?.myRun), localRun] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const resumeFrom = useMemo(() => (checkpoint ? { ticks: checkpoint.ticks, inputs: checkpoint.inputs } : null), [checkpoint]);
+  const progress = useRef<{ cp: RunCheckpoint | null; savedAt: number }>({ cp: null, savedAt: 0 });
+
+  // Make sure the latest progress is on disk if the page is closed or hidden mid-run.
+  useEffect(() => {
+    const flush = () => {
+      if (progress.current.cp) saveCheckpoint(progress.current.cp);
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flush);
+    return () => {
+      flush();
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flush);
+    };
+  }, []);
 
   // Each new match/practice session starts on the game, not on a stale summary.
   useEffect(() => {
@@ -107,25 +138,68 @@ const PlayArenaModal: React.FC = () => {
   const runElsewhere = !isPractice && !!liveMatch?.myRun && localRun === 'idle';
   const awaitingVerification = !!liveMatch && pendingSubmissions.includes(liveMatch.id);
   const interrupted = runElsewhere && liveMatch?.myRun === 'started' && !awaitingVerification;
-  const showGame = isPractice || !runElsewhere;
+  // Was it cut off on THIS device? Then it can be resumed (or its moves submitted if time ran out).
+  const savedRun = interrupted && checkpoint ? checkpoint : null;
+  const resumable = !!savedRun && canResume(savedRun);
+  const showGame = isPractice || !runElsewhere || resumable;
 
   const opponentIds = liveMatch ? liveMatch.players.filter((p) => !p.isCurrentUser).map((p) => p.id) : [];
   const autoStartAt =
     !isPractice && liveMatch?.status === 'in_progress' && liveMatch.startedAt && clockOffset !== null && !liveMatch.myRun
       ? new Date(liveMatch.startedAt).getTime() + SYNC_START_DELAY_MS - clockOffset
       : null;
-  const liveProps = isPractice ? {} : { live, opponentIds, autoStartAt };
 
   const getSeed = async (): Promise<number | null> => {
     if (isPractice || !liveMatch) return randomSeed();
     setLocalRun('starting');
-    const seed = await beginRun(liveMatch.id);
-    setLocalRun(seed !== null ? 'playing' : 'idle');
-    return seed;
+    // Save the attempt BEFORE asking the server, so a lost reply or a reload can pick the same run back up.
+    const existing = loadCheckpoint(liveMatch.id, user.id);
+    if (existing?.seed !== undefined) {
+      progress.current = { cp: existing, savedAt: Date.now() };
+      setLocalRun('playing');
+      return existing.seed;
+    }
+    const cp: RunCheckpoint = existing ?? {
+      matchId: liveMatch.id,
+      userId: user.id,
+      gameId: liveMatch.gameId as GameId,
+      durationSeconds: liveMatch.durationSeconds,
+      token: newRunToken(),
+      ticks: 0,
+      inputs: [],
+    };
+    saveCheckpoint(cp);
+    const res = await beginRun(liveMatch.id, cp.token);
+    if (!res) {
+      setLocalRun('idle');
+      return null;
+    }
+    const serverStart = res.startedAt ? new Date(res.startedAt).getTime() - (clockOffset ?? 0) : Date.now();
+    const started: RunCheckpoint = { ...cp, seed: res.seed, startedAt: Math.min(serverStart, Date.now()) };
+    saveCheckpoint(started);
+    progress.current = { cp: started, savedAt: Date.now() };
+    setLocalRun('playing');
+    return res.seed;
   };
+
+  // Saved on every input, and at most 4x/second while the game just runs.
+  const handleProgress = (ticks: number, inputs: InputEvent[], kind: 'tick' | 'input') => {
+    const cp = progress.current.cp;
+    if (isPractice || !cp) return;
+    const next = { ...cp, ticks, inputs };
+    progress.current.cp = next;
+    const now = Date.now();
+    if (kind === 'input' || now - progress.current.savedAt >= 250) {
+      progress.current.savedAt = now;
+      saveCheckpoint({ ...next, inputs: inputs.slice() });
+    }
+  };
+
+  const liveProps = isPractice ? {} : { live, opponentIds, autoStartAt, onProgress: handleProgress, resumeFrom: resumable ? resumeFrom : null };
 
   const handleFinish = async (result: RunResult) => {
     if (isPractice || !liveMatch) return;
+    progress.current.cp = null; // submitRun takes over (and clears the checkpoint)
     setLocalRun('submitting');
     await submitRun(liveMatch.id, result.inputs);
     setShowSummary(true);
@@ -134,7 +208,9 @@ const PlayArenaModal: React.FC = () => {
   const handleExit = () => {
     if (
       (localRun === 'playing' || localRun === 'starting') &&
-      !window.confirm('Leave now? Your run is already started and cannot be restarted, so it will count as 0.')
+      !window.confirm(
+        "Leave now? The match clock keeps running. You can come back and resume from the lobby while there's time; after that, the moves you made so far are submitted."
+      )
     ) {
       return;
     }
@@ -220,13 +296,25 @@ const PlayArenaModal: React.FC = () => {
           {liveMatch && !isPractice && (
             <LiveScoreboard room={liveMatch} live={live} scoreLabel={gameId === 'neondodge' ? (t) => `${(t / 60).toFixed(1)}s` : undefined} />
           )}
-          {interrupted && (
+          {interrupted && !resumable && (
             <div className="w-full p-5 rounded-2xl bg-zinc-900 border border-amber-500/30 text-center">
-              <p className="text-sm font-bold text-amber-300 mb-1">Your run was interrupted</p>
-              <p className="text-xs text-zinc-400">
-                You started your run but it never finished on this device (for example the page was closed or reloaded).
-                Each player gets one run, so it will count as 0 when the match settles.
-              </p>
+              {savedRun ? (
+                <>
+                  <p className="text-sm font-bold text-amber-300 mb-1">Your run was cut off</p>
+                  <p className="text-xs text-zinc-400">
+                    There isn't enough time left in the match to finish it, so the moves you made are submitted for scoring
+                    as soon as the game timer runs out. You don't need to keep this open.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-bold text-amber-300 mb-1">Your run is on another device</p>
+                  <p className="text-xs text-zinc-400">
+                    You started this run in another browser or on another device. Finish it there. Each player gets one
+                    run, and if it isn't finished in time it counts as 0.
+                  </p>
+                </>
+              )}
             </div>
           )}
           {showGame && (

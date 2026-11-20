@@ -29,11 +29,11 @@ const TILE: Record<number, string> = {
 
 const EMPTY_BOARD = Array.from({ length: 4 }, () => Array(4).fill(0));
 
-const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, autoStartAt }) => {
+const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, autoStartAt, onProgress, resumeFrom }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   // Opponents' boards are rebuilt from their moves; we only show their score.
   const ghosts = useGhosts(g2048Sim, live, maxTicksFor(g2048Sim, timeLimitSeconds), 0);
-  const { stateRef, hud, start, sendInput } = useGameRun(
+  const { stateRef, hud, start, resume, sendInput } = useGameRun(
     g2048Sim,
     timeLimitSeconds,
     (r) => {
@@ -46,6 +46,7 @@ const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, get
       afterStep: (_s, tick) => live?.tick(tick),
       onStart: (seed) => ghosts.setSeed(seed),
       onInput: (ev) => live?.input(ev),
+      onProgress,
     }
   );
 
@@ -117,6 +118,8 @@ const Puzzle2048Game: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, get
           getSeed={getSeed}
           start={start}
           autoStartAt={autoStartAt}
+          resumeFrom={resumeFrom}
+          resume={resume}
         />
       </div>
       <div className="w-full mt-4 flex flex-col items-center gap-1.5">

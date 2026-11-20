@@ -2,6 +2,14 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { LiveFeed } from '../../hooks/useLiveMatch';
 import { Play, RotateCcw, Loader2 } from 'lucide-react';
 import type { RunHud, RunResult } from '../../hooks/useGameRun';
+import type { InputEvent } from '../../../supabase/functions/_shared/games/index.ts';
+import { RESUME_COUNTDOWN_MS } from '../../games/runCheckpoint';
+
+/** A cut-off match run to continue (rebuilt from its recorded inputs). */
+export interface ResumeFrom {
+  ticks: number;
+  inputs: InputEvent[];
+}
 
 /** Props every Betcha game component takes. */
 export interface GameProps {
@@ -16,6 +24,10 @@ export interface GameProps {
   opponentIds?: string[];
   /** Local timestamp (Date.now() scale) when the synchronized match start fires; null = manual start. */
   autoStartAt?: number | null;
+  /** Run progress so far, after every step and input (match runs save a resumable checkpoint). */
+  onProgress?: (ticks: number, inputs: InputEvent[], kind: 'tick' | 'input') => void;
+  /** Continue this cut-off run instead of starting a new one. */
+  resumeFrom?: ResumeFrom | null;
 }
 
 export interface Theme {
@@ -58,19 +70,28 @@ export const GameOverlays: React.FC<{
   getSeed: () => Promise<number | null>;
   start: (seed: number) => void;
   autoStartAt?: number | null;
-}> = ({ hud, title, howTo, icon, theme, isPractice, timeLimitSeconds, getSeed, start, autoStartAt }) => {
+  resumeFrom?: ResumeFrom | null;
+  resume?: (seed: number, ticks: number, inputs: InputEvent[]) => void;
+}> = ({ hud, title, howTo, icon, theme, isPractice, timeLimitSeconds, getSeed, start, autoStartAt, resumeFrom, resume }) => {
   const [starting, setStarting] = useState(false);
+  const [error, setError] = useState(false);
   const [now, setNow] = useState(Date.now());
   const autoFired = useRef(false);
-  const countingDown = !!autoStartAt && !hud.running && !hud.over && autoStartAt > now - 1000 && !autoFired.current;
-
-  // Synchronized start: count down, then everyone starts their run at the same moment.
+  // A cut-off run continues by itself after a short countdown.
+  const [resumeAt, setResumeAt] = useState<number | null>(null);
   useEffect(() => {
-    if (!autoStartAt || hud.running || hud.over || autoFired.current) return;
+    if (resumeFrom && resume && !hud.running && !hud.over && resumeAt === null && !autoFired.current) setResumeAt(Date.now() + RESUME_COUNTDOWN_MS);
+  }, [resumeFrom, resume, hud.running, hud.over, resumeAt]);
+  const fireAt = resumeAt ?? autoStartAt ?? null;
+  const countingDown = !!fireAt && !hud.running && !hud.over && fireAt > now - 1000 && !autoFired.current;
+
+  // Synchronized start (or resume): count down, then the run starts at that moment.
+  useEffect(() => {
+    if (!fireAt || hud.running || hud.over || autoFired.current) return;
     const iv = setInterval(() => {
       const t = Date.now();
       setNow(t);
-      if (t >= autoStartAt && !autoFired.current) {
+      if (t >= fireAt && !autoFired.current) {
         autoFired.current = true;
         begin();
       }
@@ -81,22 +102,49 @@ export const GameOverlays: React.FC<{
   const begin = async () => {
     if (starting) return;
     setStarting(true);
+    setError(false);
     try {
       const seed = await getSeed();
-      if (seed !== null) start(seed);
+      if (seed === null) setError(true);
+      else if (resumeFrom && resume) resume(seed, resumeFrom.ticks, resumeFrom.inputs);
+      else start(seed);
     } finally {
       setStarting(false);
     }
   };
 
   if (countingDown && !starting) {
-    const secs = Math.max(0, Math.ceil((autoStartAt! - now) / 1000));
+    const secs = Math.max(0, Math.ceil((fireAt! - now) / 1000));
     return (
-      <div className="absolute inset-0 bg-zinc-950/80 flex flex-col items-center justify-center text-center">
-        <p className="text-xs uppercase tracking-widest text-zinc-400 mb-2">Everyone starts together</p>
+      <div className="absolute inset-0 bg-zinc-950/80 flex flex-col items-center justify-center text-center p-6">
+        <p className="text-xs uppercase tracking-widest text-zinc-400 mb-2">
+          {resumeFrom ? 'Picking up your run where it stopped' : 'Everyone starts together'}
+        </p>
         <span key={secs} className={`text-7xl font-black tabular-nums ${theme.accent} animate-countdown`}>
           {secs > 0 ? secs : 'GO'}
         </span>
+      </div>
+    );
+  }
+
+  if (!hud.running && !hud.over && resumeFrom) {
+    return (
+      <div className="absolute inset-0 bg-zinc-950/90 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center">
+        <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">Your run was cut off</h3>
+        <p className="text-xs text-zinc-400 mb-5 max-w-[260px]">
+          {error
+            ? "We couldn't reach the server to continue it. Check your connection and try again."
+            : 'Nothing is lost: it continues exactly where it stopped.'}
+        </p>
+        <button
+          type="button"
+          onClick={begin}
+          disabled={starting}
+          className={`w-full py-3 rounded-xl font-black text-xs uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-60 ${theme.button}`}
+        >
+          {starting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4 fill-current" />}
+          <span>{starting ? 'Resuming...' : 'Resume my run'}</span>
+        </button>
       </div>
     );
   }
@@ -107,6 +155,9 @@ export const GameOverlays: React.FC<{
         <div className={`w-14 h-14 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center mb-3 ${theme.accent}`}>{icon}</div>
         <h3 className="text-lg font-black text-white uppercase tracking-wider mb-1">{title}</h3>
         <p className="text-xs text-zinc-400 mb-2 max-w-[260px]">{howTo}</p>
+        {error && !isPractice && (
+          <p className="text-[11px] text-rose-300 mb-2 max-w-[260px]">Your run didn't start. Check your connection and tap to try again.</p>
+        )}
         <p className="text-[11px] text-zinc-500 mb-5 max-w-[260px]">
           {isPractice
             ? 'Practice run. Nothing at stake.'

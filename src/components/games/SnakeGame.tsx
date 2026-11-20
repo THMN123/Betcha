@@ -76,13 +76,13 @@ function safeViews<T>(g: { views: (now: number) => T[] }, now: number): T[] {
   }
 }
 
-const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
+const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt, onProgress, resumeFrom }) => {
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const prevSnake = useRef<Cell[] | null>(null);
   // Opponents are drawn ~250ms in the past so their (batched) moves have arrived: no visible corrections.
   const ghosts = useGhosts(snakeSim, live, maxTicksFor(snakeSim, timeLimitSeconds), 250);
 
-  const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
+  const { stateRef, alphaRef, hud, start, resume, sendInput } = useGameRun(
     snakeSim,
     timeLimitSeconds,
     (r) => {
@@ -103,6 +103,7 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
       },
       onStart: (seed) => ghosts.setSeed(seed),
       onInput: (ev) => live?.input(ev),
+      onProgress,
     }
   );
 
@@ -199,6 +200,8 @@ const SnakeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed,
           getSeed={getSeed}
           start={start}
           autoStartAt={autoStartAt}
+          resumeFrom={resumeFrom}
+          resume={resume}
         />
       </div>
       <div className="w-full mt-3 flex flex-col items-center gap-1">

@@ -26,12 +26,12 @@ const theme: Theme = {
 };
 const COLORS = ['#f43f5e', '#fb7185', '#ec4899'];
 
-const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt }) => {
+const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getSeed, onFinish, live, opponentIds = [], autoStartAt, onProgress, resumeFrom }) => {
   const prevX = useRef<number | null>(null);
   // Same walls for everyone (shared seed + synchronized start): draw opponents' orbs at "now".
   const ghosts = useGhosts(neonDodgeSim, live, maxTicksFor(neonDodgeSim, timeLimitSeconds), 0);
 
-  const { stateRef, alphaRef, hud, start, sendInput } = useGameRun(
+  const { stateRef, alphaRef, hud, start, resume, sendInput } = useGameRun(
     neonDodgeSim,
     timeLimitSeconds,
     (r) => {
@@ -51,6 +51,7 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
       },
       onStart: (seed) => ghosts.setSeed(seed),
       onInput: (ev) => live?.input(ev),
+      onProgress,
     }
   );
 
@@ -155,6 +156,8 @@ const NeonDodgeGame: React.FC<GameProps> = ({ timeLimitSeconds, isPractice, getS
           getSeed={getSeed}
           start={start}
           autoStartAt={autoStartAt}
+          resumeFrom={resumeFrom}
+          resume={resume}
         />
       </div>
       <div className="w-full mt-3 grid grid-cols-3 gap-2">

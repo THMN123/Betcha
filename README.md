@@ -61,6 +61,9 @@ Run the game tests with `cd supabase/functions && deno test _shared/games/`.
    the [Supabase CLI](https://supabase.com/docs/guides/cli): `supabase login`, `supabase link --project-ref YOUR-REF`,
    `supabase functions deploy verify-run`. Do these together with deploying the new app version: the old app can't
    submit scores once 002 is applied, and the new app can't without it.
+   Then run `004_server_time.sql`, `005_admin_void.sql` and `006_resumable_runs.sql` (each is safe to re-run).
+   006 makes starting a run safe to retry, so a lost reply or a page reload can't cost a player their run.
+   Apps from before 006 keep working after it is applied.
 3. **Email sign-up.** Works out of the box. If "Confirm email" is on (Authentication → Sign In / Providers → Email),
    players must click the link in their inbox first; turn it off for instant sign-up while testing.
 4. **Optional: Google sign-in.** Authentication → Sign In / Providers → Google: enable it and add your Google OAuth client.

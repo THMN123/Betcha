@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { maxTicksFor, type GameSim, type InputEvent } from '../../supabase/functions/_shared/games/index.ts';
+import { rebuildRun } from '../games/runCheckpoint';
 
 export interface RunResult {
   score: number;
@@ -23,6 +24,8 @@ export interface RunHooks<S> {
   onStart?: (seed: number) => void;
   /** Called with every input exactly as it is recorded for the server. */
   onInput?: (ev: InputEvent) => void;
+  /** Called after every step and input with the run so far (for saving a resumable checkpoint). */
+  onProgress?: (ticks: number, inputs: InputEvent[], kind: 'tick' | 'input') => void;
 }
 
 /**
@@ -95,6 +98,28 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
     [sim, publish]
   );
 
+  /**
+   * Continue a run that was cut off (page reload, re-render): rebuild the exact state by replaying
+   * its recorded inputs the same way the server does, then keep playing from that tick.
+   */
+  const resume = useCallback(
+    (seed: number, ticks: number, inputs: InputEvent[]) => {
+      const { state: s, tick, used } = rebuildRun(sim, seed, ticks, inputs, maxTicks, (st) => hooksRef.current.beforeStep?.(st));
+
+      stateRef.current = s;
+      ticksRef.current = tick;
+      alphaRef.current = 0;
+      inputsRef.current = inputs.slice(0, used);
+      finishedRef.current = false;
+      runningRef.current = true;
+      hooksRef.current.onStart?.(seed);
+      if (sim.isOver(s) || tick >= maxTicks) finish();
+      else publish();
+      setVersion((v) => v + 1);
+    },
+    [sim, maxTicks, finish, publish]
+  );
+
   const sendInput = useCallback(
     (code: number) => {
       const s = stateRef.current;
@@ -102,6 +127,7 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
       const ev: InputEvent = [ticksRef.current, code];
       inputsRef.current.push(ev);
       hooksRef.current.onInput?.(ev);
+      hooksRef.current.onProgress?.(ticksRef.current, inputsRef.current, 'input');
       sim.applyInput(s, code);
       if (sim.isOver(s)) finish();
       else publish();
@@ -131,6 +157,7 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
         ticksRef.current += 1;
         stepped = true;
         hooksRef.current.afterStep?.(s, ticksRef.current);
+        hooksRef.current.onProgress?.(ticksRef.current, inputsRef.current, 'tick');
         if (sim.isOver(s) || ticksRef.current >= maxTicks) {
           finish();
           acc = 0;
@@ -144,5 +171,5 @@ export function useGameRun<S>(sim: GameSim<S>, durationSeconds: number, onFinish
     return () => cancelAnimationFrame(raf);
   }, [sim, maxTicks, finish, publish]);
 
-  return { stateRef, ticksRef, alphaRef, hud, version, start, sendInput, maxTicks };
+  return { stateRef, ticksRef, alphaRef, hud, version, start, resume, sendInput, maxTicks };
 }

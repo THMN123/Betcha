@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { canResume, clearCheckpoint, listCheckpoints, loadCheckpoint, partialSubmitAt } from '../games/runCheckpoint';
 import type { Session } from '@supabase/supabase-js';
 import confetti from 'canvas-confetti';
 import {
@@ -67,7 +68,7 @@ interface AppContextType {
   togglePlayerReady: (roomId: string) => Promise<void>;
   startMatchLobby: (roomId: string) => Promise<void>;
   /** Registers your one run for a match and returns the shared seed, or null if not allowed. */
-  beginRun: (roomId: string) => Promise<number | null>;
+  beginRun: (roomId: string, token: string) => Promise<{ seed: number; startedAt: string | null } | null>;
   /** Sends a finished run's input log for server verification. Retries automatically if it fails. */
   submitRun: (roomId: string, inputs: InputEvent[]) => Promise<SubmitOutcome>;
   pendingSubmissions: string[];
@@ -534,14 +535,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Everyone (host included) is moved into the arena by the auto-enter effect below.
   };
 
-  const beginRun = async (roomId: string): Promise<number | null> => {
+  /**
+   * Starts (or, with the same token, re-fetches) this player's run. Network failures are retried:
+   * the token makes a retry return the same run instead of "You already started your run".
+   */
+  const beginRun = async (roomId: string, token: string): Promise<{ seed: number; startedAt: string | null } | null> => {
     if (!supabase) return null;
-    const { data, error } = await supabase.rpc('begin_run', { p_match_id: roomId });
-    if (error) {
-      fail(error);
-      return null;
+    let withToken = true;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 500 * 2 ** (attempt - 1)));
+      const { data, error } = await supabase.rpc(
+        'begin_run',
+        withToken ? { p_match_id: roomId, p_token: token } : { p_match_id: roomId }
+      );
+      if (!error) return { seed: Number(data.seed), startedAt: data.started_at ?? null };
+      lastError = error;
+      // Database not migrated to 006 yet: fall back to the old call (no safe retries there).
+      if (withToken && (error.code === 'PGRST202' || /begin_run\(.*p_token/i.test(error.message))) {
+        withToken = false;
+        attempt--;
+        continue;
+      }
+      // A real answer from the database (not a network problem): don't retry.
+      if (error.code) break;
     }
-    return Number(data.seed);
+    fail(lastError);
+    return null;
   };
 
   const [pendingRuns, setPendingRuns] = useState<PendingRuns>(loadPendingRuns);
@@ -549,12 +569,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const submitRun = useCallback(
     async (roomId: string, inputs: InputEvent[]): Promise<SubmitOutcome> => {
       if (!supabase) return { status: 'failed', message: 'Not connected' };
-      // Persist first, so a crash/refresh/offline moment can't lose a finished run.
-      setPendingRuns((prev) => {
-        const next = { ...prev, [roomId]: inputs };
-        savePendingRuns(next);
-        return next;
-      });
+      // Persist first (synchronously), so a crash/refresh/offline moment can't lose a finished run.
+      const queued = { ...loadPendingRuns(), [roomId]: inputs };
+      savePendingRuns(queued);
+      setPendingRuns(queued);
+      clearCheckpoint(roomId);
 
       const { data, error } = await supabase.functions.invoke('verify-run', { body: { match_id: roomId, inputs } });
 
@@ -618,6 +637,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, [myId, submitRun]);
 
+  // Runs cut off on this device with no time left to resume: submit the moves that were made,
+  // once the game's full time has passed (the server replays them to the end). A real score instead of 0.
+  useEffect(() => {
+    if (!myId) return;
+    const check = () => {
+      for (const cp of listCheckpoints(myId)) {
+        const room = rooms.find((r) => r.id === cp.matchId);
+        if (!room) continue;
+        if (room.status !== 'in_progress' || (room.myRun && room.myRun !== 'started')) {
+          clearCheckpoint(cp.matchId); // already settled or submitted
+          continue;
+        }
+        if (canResume(cp)) continue; // still playable (or being played) on this device
+        const at = partialSubmitAt(cp);
+        if (at === null) {
+          clearCheckpoint(cp.matchId); // never got the seed and can't be resumed any more
+        } else if (Date.now() >= at) {
+          submitRun(cp.matchId, cp.inputs);
+        }
+      }
+    };
+    check();
+    const t = setInterval(check, 5000);
+    return () => clearInterval(t);
+  }, [myId, rooms, submitRun]);
+
   const settleMatch = async (roomId: string) => {
     if (!supabase) return;
     const { error } = await supabase.rpc('settle_match', { p_match_id: roomId });
@@ -674,6 +719,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const me = room.players.find((p) => p.isCurrentUser);
       if (!me) continue;
 
+      // A run of mine that was cut off on this device (e.g. the page reloaded): reopen it to resume.
+      if (room.status === 'in_progress' && room.myRun === 'started' && !autoEntered.current.has(room.id) && !activePlayingMatch) {
+        const cp = loadCheckpoint(room.id, myId);
+        if (cp && canResume(cp)) {
+          autoEntered.current.add(room.id);
+          setSelectedRoomId(null);
+          showToast(`Picking up your ${room.title} run where it stopped.`, 'info');
+          enterMatchArena(room);
+        }
+      }
+
       if (room.status === 'in_progress' && me.score === undefined && !room.myRun) {
         const justStarted = before === 'waiting';
         if ((justStarted || selectedRoomId === room.id) && !autoEntered.current.has(room.id) && !activePlayingMatch) {
@@ -702,7 +758,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       }
     }
-  }, [rooms, selectedRoomId, activePlayingMatch, enterMatchArena, showToast]);
+  }, [rooms, selectedRoomId, activePlayingMatch, enterMatchArena, showToast, myId]);
 
   const escrowLedger: EscrowEntry[] = useMemo(
     () =>

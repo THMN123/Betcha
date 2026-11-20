@@ -4,6 +4,7 @@ import { useApp } from '../../context/AppContext';
 import { GAMES_LIST } from '../../data/initialData';
 import { MatchRoom } from '../../types';
 import { cr, inviteUrl, shareInvite } from '../../utils/credits';
+import { canResume, loadCheckpoint } from '../../games/runCheckpoint';
 
 // Must match settle_match() in supabase/migrations/002_verified_runs.sql
 const BEGIN_WINDOW_SECONDS = 120;
@@ -234,11 +235,30 @@ const LobbyDetailModal: React.FC<{ room: MatchRoom; onClose: () => void }> = ({ 
             </button>
           )}
 
-          {room.status === 'in_progress' && me && me.score === undefined && room.myRun === 'started' && (
-            <div className="p-3 rounded-xl bg-zinc-950 border border-amber-500/30 text-center text-xs text-amber-200">
-              Your run has started. If it was interrupted it will count as 0 when the match settles.
-            </div>
-          )}
+          {room.status === 'in_progress' && me && me.score === undefined && room.myRun === 'started' && (() => {
+            const cp = loadCheckpoint(room.id, user.id);
+            if (cp && canResume(cp)) {
+              return (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    enterMatchArena(room);
+                  }}
+                  className="w-full py-3.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 text-zinc-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2"
+                >
+                  <Play className="w-5 h-5 fill-current" /> Resume my run
+                </button>
+              );
+            }
+            return (
+              <div className="p-3 rounded-xl bg-zinc-950 border border-amber-500/30 text-center text-xs text-amber-200">
+                {cp
+                  ? "Your run was cut off and there's no time left to finish it. The moves you made are submitted for scoring when the game timer runs out."
+                  : "Your run was started on another device or browser. Finish it there; if it isn't finished in time it counts as 0."}
+              </div>
+            );
+          })()}
 
           {room.status === 'in_progress' && me && me.score !== undefined && (
             <div className="p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-center text-xs text-zinc-300 space-y-2">
